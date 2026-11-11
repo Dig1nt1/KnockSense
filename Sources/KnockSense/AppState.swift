@@ -2,7 +2,6 @@ import AppKit
 import AVFoundation
 import Combine
 import KnockCore
-import ServiceManagement
 
 struct LogEntry: Identifiable {
     let id = UUID()
@@ -179,9 +178,9 @@ final class AppState: ObservableObject {
         }
         if loaded == nil { store.save(initial) }
         AppState.current = self
-        // Show the window whenever the user opens the app themselves, so it's obvious it started
-        // (the menu-bar icon alone is easy to miss). Stay quiet when it starts automatically at login.
-        if loaded == nil || SMAppService.mainApp.status != .enabled {
+        // Show the window only on the very first launch. Afterwards KnockSense starts quietly in the
+        // menu bar; opening it again while it runs (Finder/Spotlight) brings the window up.
+        if loaded == nil {
             Task { @MainActor in SettingsWindowController.shared.show(state: self) }
         }
     }
