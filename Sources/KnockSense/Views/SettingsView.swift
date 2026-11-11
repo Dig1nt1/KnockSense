@@ -64,6 +64,50 @@ struct GeneralView: View {
                 }
             }
 
+            Section("Avoid false triggers") {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Your knock", systemImage: "hand.tap")
+                        Text(knockTrainingText)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if let session = state.training, session.zoneID == nil {
+                        ProgressView(value: Double(session.total - session.remaining), total: Double(session.total))
+                            .frame(width: 70)
+                        Text("Knock now… \(session.remaining) left").font(.caption.weight(.semibold))
+                        Button("Cancel") { state.training = nil }
+                    } else {
+                        Button(state.config.knockSamples.isEmpty ? "Teach My Knock" : "Add More") {
+                            state.startKnockTraining()
+                        }
+                        .disabled(state.training != nil)
+                        if !state.config.knockSamples.isEmpty {
+                            Button("Forget") { state.clearKnockTraining() }
+                        }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Only react to sounds that match my knock", isOn: $state.config.verifyKnocks)
+                    Text("Ignores doors, claps, footsteps and other sounds that don't sound like you knocking on the Mac, or are much quieter. Works once your knock is taught (or areas are trained).")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Ignore knock patterns that don't sound alike", isOn: $state.config.requireConsistentPatterns)
+                    Text("A door's latch click followed by the slam looks like a double knock, but the two sounds are different. Your knocks sound the same.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Text("Sounds marked “That wasn't me”: \(state.config.rejectedSounds.count)")
+                    Spacer()
+                    Button("Forget Them") { state.forgetRejectedSounds() }
+                        .disabled(state.config.rejectedSounds.isEmpty)
+                }
+            }
+
             Section("Permissions") {
                 HStack {
                     Label("Microphone", systemImage: "mic.fill")
@@ -138,5 +182,13 @@ struct GeneralView: View {
         }
         .formStyle(.grouped)
         .onAppear { accessibilityGranted = Permissions.accessibilityGranted }
+    }
+
+    private var knockTrainingText: String {
+        let count = state.trainedKnockCount
+        if count >= KnockVerifier.minimumSamples {
+            return "Learned from \(count) of your knocks. Knock the way you normally will — teach more if real knocks get ignored."
+        }
+        return "Not taught yet. Click Teach My Knock, then knock \(AppState.knockTrainingKnocks) times on your Mac the way you normally will."
     }
 }

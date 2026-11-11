@@ -6,11 +6,29 @@ public struct Zone: Codable, Identifiable, Hashable, Sendable {
     public var name: String
     /// Feature vectors recorded while training this zone.
     public var samples: [[Double]]
+    /// Peak loudness of each training knock (may be shorter than `samples` for older configs).
+    public var peaks: [Double]
 
-    public init(id: UUID = UUID(), name: String, samples: [[Double]] = []) {
+    public init(id: UUID = UUID(), name: String, samples: [[Double]] = [], peaks: [Double] = []) {
         self.id = id
         self.name = name
         self.samples = samples
+        self.peaks = peaks
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, samples, peaks }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        samples = try c.decodeIfPresent([[Double]].self, forKey: .samples) ?? []
+        peaks = try c.decodeIfPresent([Double].self, forKey: .peaks) ?? []
+    }
+
+    /// Training knocks as sound samples (peak 0 when unknown — ignored by the loudness check).
+    public var soundSamples: [SoundSample] {
+        samples.enumerated().map { i, f in SoundSample(features: f, peak: i < peaks.count ? Float(peaks[i]) : 0) }
     }
 }
 
@@ -139,10 +157,27 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var useBuiltInMic = true
     /// Look for new versions in the background and announce them in the menu.
     public var autoCheckUpdates = true
+    /// Only react to sounds that resemble the user's trained knocks (once trained).
+    public var verifyKnocks = true
+    /// The knocks of a multi-knock pattern must sound alike (rejects door click + slam, etc.).
+    public var requireConsistentPatterns = true
+    /// "Teach my knock" samples and their peak loudness.
+    public var knockSamples: [[Double]] = []
+    public var knockPeaks: [Double] = []
+    /// Sounds the user marked with "That wasn't me".
+    public var rejectedSounds: [[Double]] = []
     public var rules: [Rule] = []
     public var zones: [Zone] = []
 
     public init() {}
+
+    /// Everything known about how the user knocks: "Teach my knock" plus all area training.
+    public var trainedKnocks: [SoundSample] {
+        let mine = knockSamples.enumerated().map { i, f in
+            SoundSample(features: f, peak: i < knockPeaks.count ? Float(knockPeaks[i]) : 0)
+        }
+        return mine + zones.flatMap(\.soundSamples)
+    }
 
     public static var defaults: AppConfig {
         var config = AppConfig()
@@ -154,7 +189,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates, rules, zones
+        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates
+        case verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -167,6 +203,11 @@ public struct AppConfig: Codable, Equatable, Sendable {
         ignoreWhileTyping = try c.decodeIfPresent(Bool.self, forKey: .ignoreWhileTyping) ?? true
         useBuiltInMic = try c.decodeIfPresent(Bool.self, forKey: .useBuiltInMic) ?? true
         autoCheckUpdates = try c.decodeIfPresent(Bool.self, forKey: .autoCheckUpdates) ?? true
+        verifyKnocks = try c.decodeIfPresent(Bool.self, forKey: .verifyKnocks) ?? true
+        requireConsistentPatterns = try c.decodeIfPresent(Bool.self, forKey: .requireConsistentPatterns) ?? true
+        knockSamples = try c.decodeIfPresent([[Double]].self, forKey: .knockSamples) ?? []
+        knockPeaks = try c.decodeIfPresent([Double].self, forKey: .knockPeaks) ?? []
+        rejectedSounds = try c.decodeIfPresent([[Double]].self, forKey: .rejectedSounds) ?? []
         rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
         zones = try c.decodeIfPresent([Zone].self, forKey: .zones) ?? []
     }

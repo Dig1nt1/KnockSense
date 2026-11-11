@@ -79,7 +79,7 @@ struct ZoneRow: View {
             Spacer()
 
             if let session = state.training, session.zoneID == zone.id {
-                ProgressView(value: Double(AppState.trainingKnocks - session.remaining), total: Double(AppState.trainingKnocks))
+                ProgressView(value: Double(session.total - session.remaining), total: Double(session.total))
                     .frame(width: 80)
                 Text("Knock now… \(session.remaining) left").font(.caption.weight(.semibold))
                 Button("Cancel") { state.training = nil }

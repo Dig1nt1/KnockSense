@@ -86,6 +86,18 @@ Accessibility is granted in **System Settings ▸ Privacy & Security ▸ Accessi
 tab has a shortcut button. Because the app is signed locally ("ad-hoc"), macOS may ask for
 permissions again after you rebuild it.
 
+## Stopping false triggers (doors, claps, footsteps)
+
+* **Teach my knock** (Settings ▸ General, or the tip in the menu): knock 8 times. KnockSense then only
+  reacts to sounds that match your knock's tone, and ignores sounds that are much quieter than your
+  knocks. A door across the room is both different-sounding and far quieter at the mic than a knuckle
+  on the case.
+* **Patterns must sound alike:** a door's latch click followed by the slam produces two sharp sounds
+  close together, which looks like a double knock. But the two sounds are very different, while your
+  two knocks sound the same, so patterns like that are ignored. This needs no setup.
+* **That wasn't me:** if something still sets it off, click **That wasn't me** in the menu (shown
+  for a minute after an action runs) and sounds like that are ignored from then on.
+
 ## How it works
 
 The Apple Silicon MacBook motion sensor has no public API. Reading it needs root and undocumented

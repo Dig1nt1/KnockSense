@@ -1,4 +1,5 @@
 import SwiftUI
+import KnockCore
 
 struct MenuView: View {
     @EnvironmentObject var state: AppState
@@ -34,6 +35,29 @@ struct MenuView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+
+            if state.canMarkLastAsNotMe {
+                Button {
+                    state.markLastAsNotMe()
+                } label: {
+                    Label("That wasn't me — ignore sounds like that", systemImage: "hand.raised")
+                }
+                .font(.caption)
+                .help("Teaches KnockSense that the sound which just ran an action wasn't your knock.")
+            }
+
+            if state.config.verifyKnocks && state.trainedKnockCount < KnockVerifier.minimumSamples && state.training == nil {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "lightbulb").foregroundStyle(.yellow)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Doors or other noises setting it off? Teach KnockSense your knock (8 knocks).")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Teach My Knock") { state.startKnockTraining() }
+                            .font(.caption)
+                    }
+                }
+            }
 
             if !state.log.isEmpty {
                 Divider()
@@ -89,7 +113,8 @@ struct StatusLine: View {
         if state.micStatus == .denied { return "Microphone access denied" }
         if let error = state.engineError { return error }
         if let session = state.training {
-            return "Training “\(state.zoneName(session.zoneID) ?? "area")” — knock \(session.remaining) more"
+            let target = session.zoneID == nil ? "your knock" : "“\(state.zoneName(session.zoneID) ?? "area")”"
+            return "Training \(target) — knock \(session.remaining) more"
         }
         if state.testMode { return "Test mode — actions won't run" }
         return state.listening ? "Listening for knocks" : "Starting…"

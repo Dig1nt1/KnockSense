@@ -270,6 +270,13 @@ final class PatternTests: XCTestCase {
         XCTAssertTrue(config.ignoreWhileTyping)
         XCTAssertTrue(config.useBuiltInMic)
         XCTAssertTrue(config.autoCheckUpdates)
+        XCTAssertTrue(config.verifyKnocks)
+        XCTAssertTrue(config.requireConsistentPatterns)
+        // Areas saved by older versions have samples but no peaks.
+        let oldZone = #"{"zones":[{"id":"5F3B1C2A-1111-4222-8333-944455556666","name":"Lid","samples":[[1,2],[3,4]]}]}"#
+        let withZone = try JSONDecoder().decode(AppConfig.self, from: Data(oldZone.utf8))
+        XCTAssertEqual(withZone.zones.first?.peaks, [])
+        XCTAssertEqual(withZone.trainedKnocks.count, 2)
         let defaults = AppConfig.defaults
         let roundTrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(defaults))
         XCTAssertEqual(roundTrip, defaults)
@@ -325,3 +332,127 @@ final class BuiltinActionTests: XCTestCase {
     }
 }
 
+extension Synth {
+    /// A door opening/closing nearby: a light latch click, then ~0.25 s later a heavy low thud.
+    func addDoor(_ x: inout [Float], at t: Double, amp: Float = 0.2) {
+        addKnocks(&x, at: [t], amp: amp * 0.7, modes: [1800, 4200, 6100])          // latch click
+        let start = Int((t + 0.25) * sampleRate)                                       // door hits frame
+        for i in 0..<Int(0.15 * sampleRate) where start + i < x.count {
+            let tt = Double(i) / sampleRate
+            let v = sin(2 * .pi * 70 * tt) + 0.8 * sin(2 * .pi * 140 * tt) + 0.5 * sin(2 * .pi * 310 * tt)
+            x[start + i] += Float(Double(amp) * exp(-tt / 0.02) * v / 2.3)
+        }
+    }
+}
+
+/// Runs the detector and returns (features, peak, time) for each detected sound.
+func detectSounds(_ x: [Float], sensitivity: Double = 0.5) -> [(features: [Double], peak: Float, time: Double)] {
+    let detector = KnockDetector(sampleRate: 48_000, channelCount: 2, params: .forSensitivity(sensitivity))
+    var out: [(features: [Double], peak: Float, time: Double)] = []
+    var i = 0
+    while i < x.count {
+        let chunk = Array(x[i..<min(i + 1024, x.count)])
+        for e in detector.process([chunk, chunk.map { $0 * 0.8 }]) {
+            out.append((FeatureExtractor.extract(e), e.peak, Double(e.onsetSample) / 48_000))
+        }
+        i += 1024
+    }
+    return out
+}
+
+/// Everyday sounds (a door opening) must not count as a deliberate double knock.
+final class FalseTriggerTests: XCTestCase {
+    private var synth = Synth()
+
+    private func samples(_ x: [Float]) -> [SoundSample] {
+        detectSounds(x).map { SoundSample(features: $0.features, peak: $0.peak) }
+    }
+
+    /// 8 training knocks with natural variation in force and resonance ("Teach my knock").
+    private func trainedKnocks() -> [SoundSample] {
+        var train = synth.signal(duration: 9)
+        for i in 0..<8 {
+            let jitter = 1 + Double(i % 3 - 1) * 0.04
+            synth.addKnocks(&train, at: [0.5 + Double(i)], amp: 0.3 + Float(i % 4) * 0.06,
+                            modes: [400 * jitter, 1500 * jitter, 3200 * jitter])
+        }
+        return samples(train)
+    }
+
+    private func doorSounds(amp: Float = 0.2) -> [SoundSample] {
+        var x = synth.signal(duration: 2)
+        synth.addDoor(&x, at: 0.5, amp: amp)
+        return samples(x)
+    }
+
+    func testDoorLooksLikeTwoKnocksToTheRawDetector() {
+        // This is the bug: without the new checks a door is a "double knock".
+        XCTAssertEqual(doorSounds().count, 2)
+    }
+
+    func testDoorIsNotAConsistentPattern() {
+        XCTAssertFalse(PatternConsistency.isConsistent(doorSounds()))
+        XCTAssertFalse(PatternConsistency.isConsistent(doorSounds(amp: 0.5)))
+    }
+
+    func testRealDoubleKnockIsConsistent() {
+        var x = synth.signal(duration: 2)
+        synth.addKnocks(&x, at: [0.5, 0.75], amp: 0.35)
+        synth.addKnocks(&x, at: [1.4], amp: 0.2)      // softer third knock still matches
+        XCTAssertTrue(PatternConsistency.isConsistent(samples(x)))
+    }
+
+    func testVerifierAcceptsYourKnocksIncludingDuringAMovie() {
+        let knocks = trainedKnocks()
+        XCTAssertEqual(knocks.count, 8)
+        var quiet = synth.signal(duration: 2)
+        synth.addKnocks(&quiet, at: [0.5, 0.75], amp: 0.35)
+        var movie = synth.movie(duration: 4, rms: 0.06)
+        synth.addKnocks(&movie, at: [2.0, 2.25], amp: 0.4)
+        for sound in samples(quiet) + samples(movie) {
+            XCTAssertEqual(KnockVerifier.verify(sound, knocks: knocks, rejected: []), .accepted)
+        }
+    }
+
+    func testVerifierRejectsDoor() {
+        let knocks = trainedKnocks()
+        for sound in doorSounds() + doorSounds(amp: 0.5) {
+            XCTAssertNotEqual(KnockVerifier.verify(sound, knocks: knocks, rejected: []), .accepted)
+        }
+    }
+
+    func testVerifierRejectsMuchQuieterSounds() {
+        let knocks = trainedKnocks()
+        var x = synth.signal(duration: 2)
+        synth.addKnocks(&x, at: [0.5], amp: 0.06)     // same kind of sound, far away / very light
+        // At the highest sensitivity the detector hears it; the loudness check must still reject it.
+        let faint = detectSounds(x, sensitivity: 1).map { SoundSample(features: $0.features, peak: $0.peak) }
+        XCTAssertEqual(faint.count, 1)
+        guard let sound = faint.first else { return }
+        XCTAssertEqual(KnockVerifier.verify(sound, knocks: knocks, rejected: []), .tooQuiet)
+    }
+
+    func testThatWasntMeLearnsTheSound() {
+        let knocks = trainedKnocks()
+        // A knock-ish sound that is a bit different (e.g. something tapping the desk).
+        var desk = synth.signal(duration: 3)
+        synth.addKnocks(&desk, at: [0.5], amp: 0.35, modes: [300, 1100, 2600])
+        synth.addKnocks(&desk, at: [1.5], amp: 0.3, modes: [310, 1150, 2550])
+        let deskSounds = samples(desk)
+        XCTAssertEqual(deskSounds.count, 2)
+        guard deskSounds.count == 2 else { return }
+        // User presses "That wasn't me" after the first one…
+        let rejected = [deskSounds[0].features]
+        // …so the next similar sound is ignored, while real knocks still work.
+        XCTAssertEqual(KnockVerifier.verify(deskSounds[1], knocks: knocks, rejected: rejected), .markedAsNotAKnock)
+        var mine = synth.signal(duration: 2)
+        synth.addKnocks(&mine, at: [0.5], amp: 0.35)
+        guard let myKnock = samples(mine).first else { return XCTFail("knock not detected") }
+        XCTAssertEqual(KnockVerifier.verify(myKnock, knocks: knocks, rejected: rejected), .accepted)
+    }
+
+    func testVerifierStaysOffUntilTrained() {
+        guard let sound = doorSounds().first else { return XCTFail("door not detected") }
+        XCTAssertEqual(KnockVerifier.verify(sound, knocks: [], rejected: []), .notTrained)
+    }
+}
