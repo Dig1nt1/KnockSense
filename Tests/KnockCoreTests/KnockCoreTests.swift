@@ -3,7 +3,7 @@ import XCTest
 
 /// Synthetic audio helpers: knocks are bursts of exponentially-damped resonances,
 /// "speech" is a sustained harmonic tone.
-private struct Synth {
+struct Synth {
     var seed: UInt64 = 0x1234_5678
     let sampleRate: Double = 48_000
 
@@ -37,6 +37,94 @@ private struct Synth {
             }
         }
         return x
+    }
+}
+
+extension Synth {
+    /// Film-like soundtrack as heard by the Mac's mic: a music bed with chord changes plus
+    /// dialogue syllables (sharp-ish onsets, 80–250 ms long, varying pitch), scaled to `rms`.
+    mutating func movie(duration: Double, rms: Float) -> [Float] {
+        let n = Int(duration * sampleRate)
+        var x = [Float](repeating: 0, count: n)
+        // Music bed: chords changing every 0.6 s, slow swells.
+        let chords: [[Double]] = [[110, 220, 277, 330], [98, 196, 247, 294], [87, 175, 220, 262], [131, 262, 330, 392]]
+        for i in 0..<n {
+            let t = Double(i) / sampleRate
+            let chord = chords[Int(t / 0.6) % chords.count]
+            let swell = 0.6 + 0.4 * sin(2 * .pi * 0.3 * t)
+            var v = 0.0
+            for f in chord { v += sin(2 * .pi * f * t) }
+            x[i] = Float(0.35 * swell * v / Double(chord.count)) + noise() * 0.05
+        }
+        // Dialogue: syllables with 10 ms attacks.
+        var t = 0.05
+        while t < duration {
+            let len = 0.08 + Double(abs(noise())) * 0.17
+            let pitch = 120 + Double(abs(noise())) * 180
+            let amp = 0.8 + Double(noise()) * 0.3
+            let start = Int(t * sampleRate)
+            for i in 0..<Int(len * sampleRate) where start + i < n {
+                let tt = Double(i) / sampleRate
+                let env = min(1, tt / 0.01) * min(1, (len - tt) / 0.03)
+                var v = 0.0
+                for h in 1...6 { v += sin(2 * .pi * pitch * Double(h) * tt) / Double(h) }
+                x[start + i] += Float(amp * env * v * 0.6) + noise() * Float(0.15 * env)
+            }
+            t += len + 0.03 + Double(abs(noise())) * 0.25
+        }
+        // Normalise to the requested RMS.
+        let current = sqrt(x.reduce(0) { $0 + $1 * $1 } / Float(n))
+        return x.map { $0 * rms / current }
+    }
+
+    /// Adds knocks (damped resonances) on top of an existing signal.
+    func addKnocks(_ x: inout [Float], at times: [Double], amp: Float, modes: [Double] = [400, 1500, 3200]) {
+        for k in times {
+            let start = Int(k * sampleRate)
+            for i in 0..<Int(0.08 * sampleRate) where start + i < x.count {
+                let t = Double(i) / sampleRate
+                var v = 0.0
+                for f in modes { v += sin(2 * .pi * f * t) }
+                x[start + i] += Float(Double(amp) * exp(-t / 0.006) * v / Double(modes.count))
+            }
+        }
+    }
+}
+
+/// Knocking while a movie plays: the soundtrack comes out of the speakers into the mic.
+final class MovieAudioTests: XCTestCase {
+    private let knockTimes = [2.0, 2.25, 5.0, 5.25, 5.5, 8.0, 8.25, 11.0, 11.3, 14.0, 14.25, 17.0]
+
+    private func knocksDetected(movieRMS: Float, sensitivity: Double = 0.5) -> (knocks: Int, falseAlarms: Int) {
+        var s = Synth()
+        var x = s.movie(duration: 20, rms: movieRMS)
+        let falseAlarms = detect(x, params: .forSensitivity(sensitivity)).count
+        s.addKnocks(&x, at: knockTimes, amp: 0.4)
+        return (detect(x, params: .forSensitivity(sensitivity)).count, falseAlarms)
+    }
+
+    func testDetectsKnocksOverQuietMovie() {
+        XCTAssertEqual(knocksDetected(movieRMS: 0.03).knocks, knockTimes.count)
+    }
+
+    func testDetectsKnocksOverNormalMovie() {
+        XCTAssertEqual(knocksDetected(movieRMS: 0.06).knocks, knockTimes.count)
+    }
+
+    func testDetectsMostKnocksOverLoudMovie() {
+        XCTAssertGreaterThanOrEqual(knocksDetected(movieRMS: 0.1).knocks, knockTimes.count - 2)
+    }
+
+    func testMovieDialogueAndMusicAreNotKnocks() {
+        for rms: Float in [0.03, 0.06, 0.1, 0.15] {
+            XCTAssertEqual(knocksDetected(movieRMS: rms).falseAlarms, 0, "movie rms \(rms)")
+        }
+    }
+
+    func testHighSensitivityStaysUsableDuringMovie() {
+        let result = knocksDetected(movieRMS: 0.1, sensitivity: 1)
+        XCTAssertGreaterThanOrEqual(result.knocks - result.falseAlarms, knockTimes.count - 1)
+        XCTAssertLessThanOrEqual(result.falseAlarms, 1)
     }
 }
 
@@ -180,6 +268,7 @@ final class PatternTests: XCTestCase {
         XCTAssertEqual(config.sensitivity, 0.8)
         XCTAssertTrue(config.enabled)
         XCTAssertTrue(config.ignoreWhileTyping)
+        XCTAssertTrue(config.useBuiltInMic)
         let defaults = AppConfig.defaults
         let roundTrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(defaults))
         XCTAssertEqual(roundTrip, defaults)

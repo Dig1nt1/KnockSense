@@ -132,6 +132,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var playSound = true
     /// Ignore knocks right after keyboard / trackpad clicks (they sound like knocks too).
     public var ignoreWhileTyping = true
+    /// Listen through the Mac's built-in mic even when AirPods / a headset are the default input.
+    public var useBuiltInMic = true
     public var rules: [Rule] = []
     public var zones: [Zone] = []
 
@@ -147,7 +149,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, rules, zones
+        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -158,6 +160,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knockGap = try c.decodeIfPresent(Double.self, forKey: .knockGap) ?? 0.45
         playSound = try c.decodeIfPresent(Bool.self, forKey: .playSound) ?? true
         ignoreWhileTyping = try c.decodeIfPresent(Bool.self, forKey: .ignoreWhileTyping) ?? true
+        useBuiltInMic = try c.decodeIfPresent(Bool.self, forKey: .useBuiltInMic) ?? true
         rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
         zones = try c.decodeIfPresent([Zone].self, forKey: .zones) ?? []
     }

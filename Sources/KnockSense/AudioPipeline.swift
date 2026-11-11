@@ -28,6 +28,8 @@ final class AudioPipeline: @unchecked Sendable {
 
     private(set) var isRunning = false
     private(set) var inputDescription = "—"
+    /// Listen to the built-in mic even when AirPods/a headset are the system default input.
+    var preferBuiltInMic = true
 
     init(params: DetectorParams) {
         self.params = params
@@ -36,25 +38,28 @@ final class AudioPipeline: @unchecked Sendable {
     func start() throws {
         guard !isRunning else { return }
         let input = engine.inputNode
+
+        var usingBuiltIn = false
+        if preferBuiltInMic, let device = AudioDevices.builtInMicrophone(), let unit = input.audioUnit {
+            usingBuiltIn = AudioDevices.setInputDevice(device, on: unit)
+        }
+
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else { throw AudioPipelineError.noInputDevice }
 
-        let sampleRate = format.sampleRate
-        let channelCount = Int(format.channelCount)
-        queue.sync {
-            self.detector = KnockDetector(sampleRate: sampleRate, channelCount: channelCount, params: self.params)
-        }
-
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // format: nil lets the engine use the device's real format; the detector is (re)built from
+        // the first buffer's format, so a device switch can never cause a format mismatch.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             guard let self, let data = buffer.floatChannelData else { return }
             let frames = Int(buffer.frameLength)
             let count = Int(buffer.format.channelCount)
+            let sampleRate = buffer.format.sampleRate
             var copy: [[Float]] = []
             copy.reserveCapacity(count)
             for c in 0..<count {
                 copy.append(Array(UnsafeBufferPointer(start: data[c], count: frames)))
             }
-            self.queue.async { self.process(copy) }
+            self.queue.async { self.process(copy, sampleRate: sampleRate) }
         }
 
         engine.prepare()
@@ -65,8 +70,8 @@ final class AudioPipeline: @unchecked Sendable {
             throw error
         }
         isRunning = true
-        let name = AVCaptureDevice.default(for: .audio)?.localizedName ?? "Microphone"
-        inputDescription = "\(name) · \(channelCount) ch · \(Int(sampleRate)) Hz"
+        let name = usingBuiltIn ? "Built-in microphone" : (AVCaptureDevice.default(for: .audio)?.localizedName ?? "Microphone")
+        inputDescription = "\(name) · \(format.channelCount) ch · \(Int(format.sampleRate)) Hz"
 
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
@@ -103,7 +108,11 @@ final class AudioPipeline: @unchecked Sendable {
         onRestart?(message)
     }
 
-    private func process(_ channels: [[Float]]) {
+    private func process(_ channels: [[Float]], sampleRate: Double) {
+        guard !channels.isEmpty, sampleRate > 0 else { return }
+        if detector == nil || detector?.sampleRate != sampleRate || detector?.channelCount != channels.count {
+            detector = KnockDetector(sampleRate: sampleRate, channelCount: channels.count, params: params)
+        }
         guard let detector else { return }
         let events = detector.process(channels)
         let now = CFAbsoluteTimeGetCurrent()

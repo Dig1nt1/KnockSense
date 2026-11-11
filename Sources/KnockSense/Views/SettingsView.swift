@@ -46,6 +46,12 @@ struct GeneralView: View {
                     Slider(value: $state.config.knockGap, in: 0.25...0.8)
                 }
                 Toggle("Ignore knocks while typing or clicking", isOn: $state.config.ignoreWhileTyping)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Always use the Mac's built-in microphone", isOn: $state.config.useBuiltInMic)
+                    Text("Recommended. With AirPods or a headset connected, macOS switches to their microphone, which can't hear knocks on the Mac (and using it lowers AirPods sound quality).")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Toggle("Play a sound when an action runs", isOn: $state.config.playSound)
                 HStack {
                     Text("Input")

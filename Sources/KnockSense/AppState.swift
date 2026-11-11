@@ -82,6 +82,7 @@ final class AppState: ObservableObject {
         let initial = loaded ?? AppConfig.defaults
         config = initial
         audio = AudioPipeline(params: .forSensitivity(initial.sensitivity))
+        audio.preferBuiltInMic = initial.useBuiltInMic
         grouper = PatternGrouper(gap: initial.knockGap, maxCount: RuleMatcher.maxKnockCount(in: initial.rules))
         zoneAccuracy = ZoneClassifier.selfTestAccuracy(zones: initial.zones)
 
@@ -263,6 +264,12 @@ final class AppState: ObservableObject {
         }
         if config.enabled != old.enabled {
             if config.enabled { startListening() } else { stopListening() }
+        } else if config.useBuiltInMic != old.useBuiltInMic {
+            audio.preferBuiltInMic = config.useBuiltInMic
+            if listening {
+                stopListening()
+                startListening()
+            }
         }
         scheduleSave()
     }

@@ -86,10 +86,17 @@ mic audio ─▶ KnockDetector ─▶ FeatureExtractor ─▶ ZoneClassifier ─
               decay check)     inter-mic cues)      neighbours)       knocks)           beats "anywhere")
 ```
 
-* **Detection:** the audio is split into frames of about 5 ms. A frame counts as a knock onset when
-  it is much louder than the running noise floor, its peak passes the sensitivity threshold, and
-  the level jumped suddenly. 50 ms later the sound must have died away. Knocks fade fast; voices,
-  music and fans don't.
+* **Detection:** the audio is analysed in frames of about 5 ms, in the full band and in four
+  frequency bands at once. A frame is a knock onset when, in some band, it is much louder than
+  that band's background (the median of the last 0.3 s) *and* several times louder than anything in
+  the previous 20 ms. Then, 20 to 50 ms later, the sound must have died away, or fallen back to what
+  was playing just before the knock. Knocks fade within about 15 ms; words, notes and fans don't.
+* **Knocking during a movie or music:** the soundtrack comes out of the speakers and into the mic.
+  Soundtracks are mostly low and mid frequencies, while a knock is a sharp broadband click. So the
+  knock still stands out in the bands the soundtrack leaves quieter, and the "back to what was
+  playing" check accepts knocks on top of ongoing sound. In tests with simulated film audio, all
+  knocks are caught at normal volume, nearly all at loud volume, and dialogue and music cause no
+  false triggers.
 * **Areas:** each knock is turned into a fingerprint: 16 frequency bands, brightness, decay speed,
   and the level and timing differences between the built-in microphones. It is then matched
   against your training knocks.
@@ -110,7 +117,9 @@ the menu at any time.
 * Area detection works best when the spots are far apart and on different parts of the case
   (palm rest vs. lid vs. bottom). Train with the Mac where you normally use it.
 * Area training is tied to the current microphone. If you switch to an external mic, retrain.
-* A headset or external microphone won't pick up knocks on the case. Use the built-in mic.
+* KnockSense always listens through the Mac's built-in microphone, even when AirPods or a headset
+  are connected (their mics can't hear knocks on the Mac). You can turn this off in General.
+* During a very loud movie, knock a bit firmer, or raise the sensitivity one notch.
 
 ## Project layout
 
