@@ -25,6 +25,21 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./build.sh
 
+      - name: Smoke test (app launches and stays running)
+        run: |
+          open build/KnockSense.app
+          sleep 20
+          if pgrep -x KnockSense >/dev/null; then
+            echo "OK: KnockSense is running"
+            pkill -x KnockSense || true
+          else
+            echo "ERROR: KnockSense is not running 20 s after launch"
+            REPORT=$(ls -t ~/Library/Logs/DiagnosticReports/KnockSense* 2>/dev/null | head -1)
+            if [ -n "$REPORT" ]; then echo "Crash report: $REPORT"; head -150 "$REPORT"; fi
+            log show --last 2m --style compact --predicate 'process == "KnockSense"' 2>/dev/null | tail -60
+            exit 1
+          fi
+
       - name: Zip app and write update manifest
         run: |
           cd build

@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct KnockSenseApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var state = AppState()
 
     var body: some Scene {
@@ -18,6 +19,18 @@ struct KnockSenseApp: App {
     private var menuBarSymbol: String {
         if state.flash { return "hand.tap.fill" }
         return state.listening && state.config.enabled ? "hand.tap" : "hand.raised.slash"
+    }
+}
+
+/// Menu-bar apps have no Dock icon, and the icon can be hidden behind the MacBook notch. So when the
+/// user opens KnockSense again from Finder / Launchpad / Spotlight while it's running, show the window.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let state = AppState.current {
+            SettingsWindowController.shared.show(state: state)
+        }
+        return true
     }
 }
 

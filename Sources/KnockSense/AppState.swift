@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import KnockCore
+import ServiceManagement
 
 struct LogEntry: Identifiable {
     let id = UUID()
@@ -51,6 +52,8 @@ struct ConfigStore {
 @MainActor
 final class AppState: ObservableObject {
     static let trainingKnocks = 6
+    /// The running app's state, for AppKit callbacks that live outside SwiftUI.
+    static weak var current: AppState?
 
     @Published var config: AppConfig {
         didSet { configDidChange(from: oldValue) }
@@ -113,9 +116,11 @@ final class AppState: ObservableObject {
         updater.startAutomaticChecks { [weak self] in self?.config.autoCheckUpdates ?? false }
 
         if initial.enabled { startListening() }
-        if loaded == nil {
-            store.save(initial)
-            // First launch: open the settings window so the user sees how it works.
+        if loaded == nil { store.save(initial) }
+        AppState.current = self
+        // Show the window whenever the user opens the app themselves, so it's obvious it started
+        // (the menu-bar icon alone is easy to miss). Stay quiet when it starts automatically at login.
+        if loaded == nil || SMAppService.mainApp.status != .enabled {
             Task { @MainActor in SettingsWindowController.shared.show(state: self) }
         }
     }
