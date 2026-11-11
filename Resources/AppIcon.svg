@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="18"/><feOffset dy="14"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.38"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="squircle"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <filter id="blur80" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="80"/></filter>
+    <filter id="blur40" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter>
+    <filter id="blur18" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="blur8" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.28"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    
+  <linearGradient id="g3bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fafbfc"/><stop offset="1" stop-color="#c3c8d0"/></linearGradient>
+  <radialGradient id="g3dot"><stop offset="0" stop-color="#bfe0ff"/><stop offset="0.5" stop-color="#3b9bff"/><stop offset="1" stop-color="#0a64d8"/></radialGradient>
+  <pattern id="g3brush" width="1024" height="6" patternUnits="userSpaceOnUse"><rect width="1024" height="3" fill="#fff" opacity="0.18"/></pattern>
+
+  </defs>
+  <g filter="url(#dropshadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="#e5e7eb"/>
+    <g clip-path="url(#squircle)">
+      
+  <rect x="100" y="100" width="824" height="824" fill="url(#g3bg)"/>
+  <rect x="100" y="100" width="824" height="824" fill="url(#g3brush)"/>
+  
+    <circle cx="512" cy="514" r="250" fill="none" stroke="#ffffff" stroke-width="10" opacity="0.95"/>
+    <circle cx="512" cy="510" r="250" fill="none" stroke="#7b8494" stroke-width="10" opacity="0.35"/>
+    <circle cx="512" cy="514" r="180" fill="none" stroke="#ffffff" stroke-width="9" opacity="0.95"/>
+    <circle cx="512" cy="510" r="180" fill="none" stroke="#7b8494" stroke-width="9" opacity="0.47"/>
+    <circle cx="512" cy="514" r="112" fill="none" stroke="#ffffff" stroke-width="8" opacity="0.95"/>
+    <circle cx="512" cy="510" r="112" fill="none" stroke="#7b8494" stroke-width="8" opacity="0.59"/>
+  <circle cx="512" cy="512" r="78" fill="#0a84ff" opacity="0.55" filter="url(#blur18)"/>
+  <circle cx="512" cy="512" r="52" fill="url(#g3dot)"/>
+  <circle cx="498" cy="496" r="15" fill="#fff" opacity="0.8" filter="url(#blur8)"/>
+
+      <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"/>
+    </g>
+    <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>
+  </g>
+</svg>

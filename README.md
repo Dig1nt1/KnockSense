@@ -176,7 +176,7 @@ Sources/KnockSense/       the macOS app (SwiftUI menu-bar app)
   ActionRunner.swift        runs actions, permissions helpers
   Views/                    menu, actions, areas and general settings UI
 Tests/KnockCoreTests/     tests with synthetic knock / speech audio
-Resources/                Info.plist, app icon
+Resources/                Info.plist, app icon (AppIcon.svg is the editable source; AppIcon.png is rendered from it)
 build.sh                  builds KnockSense.app
 ```
 
