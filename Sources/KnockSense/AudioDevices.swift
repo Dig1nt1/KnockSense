@@ -19,6 +19,50 @@ enum AudioDevices {
         return devices.first { transportType(of: $0) == kAudioDeviceTransportTypeBuiltIn && inputChannelCount(of: $0) > 0 }
     }
 
+    /// The built-in speakers, or nil on Macs without them.
+    static func builtInSpeakers() -> AudioDeviceID? {
+        allDevices().first { transportType(of: $0) == kAudioDeviceTransportTypeBuiltIn && channelCount(of: $0, scope: kAudioDevicePropertyScopeOutput) > 0 }
+    }
+
+    static func defaultOutputDevice() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr,
+              device != 0 else { return nil }
+        return device
+    }
+
+    @discardableResult
+    static func setDefaultOutputDevice(_ device: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var id = device
+        return AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+                                          UInt32(MemoryLayout<AudioDeviceID>.size), &id) == noErr
+    }
+
+    private static func allDevices() -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &devices) == noErr else { return [] }
+        return devices
+    }
+
     /// Points an input audio unit (e.g. `AVAudioEngine.inputNode.audioUnit`) at a specific device.
     /// Must be called while the engine is stopped. Returns true on success.
     @discardableResult
@@ -44,9 +88,13 @@ enum AudioDevices {
     }
 
     private static func inputChannelCount(of device: AudioDeviceID) -> Int {
+        channelCount(of: device, scope: kAudioDevicePropertyScopeInput)
+    }
+
+    private static func channelCount(of device: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: kAudioDevicePropertyScopeInput,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         var size: UInt32 = 0

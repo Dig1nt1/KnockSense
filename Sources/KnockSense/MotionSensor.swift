@@ -23,6 +23,8 @@ final class MotionSensor: @unchecked Sendable {
     var onTap: (@Sendable (TapEvent) -> Void)?
     var onLevel: (@Sendable (Float) -> Void)?
     var onState: (@Sendable (State) -> Void)?
+    /// Laptop Guard: called when the Mac is lifted, tilted or carried while the guard watches.
+    var onMovement: (@Sendable (String) -> Void)?
 
     private let queue = DispatchQueue(label: "app.knocksense.motion", qos: .userInitiated)
     private var fd: Int32 = -1
@@ -31,6 +33,7 @@ final class MotionSensor: @unchecked Sendable {
     private var helloReceived = false
     private var running = false
     private var detector: TapDetector
+    private var movement: MovementDetector?      // non-nil while Laptop Guard watches for movement
     private var lastLevelTime = 0.0
     private var lastSampleTime = 0.0
     private var state: State = .stopped {
@@ -55,6 +58,10 @@ final class MotionSensor: @unchecked Sendable {
             self.disconnect()
             self.state = .stopped
         }
+    }
+
+    func setMovementWatch(_ active: Bool) {
+        queue.async { self.movement = active ? MovementDetector() : nil }
     }
 
     func updateParams(_ params: TapParams) {
@@ -172,6 +179,9 @@ final class MotionSensor: @unchecked Sendable {
         guard parts.count == 5, parts[0] == "s",
               let t = Double(parts[1]), let x = Double(parts[2]), let y = Double(parts[3]), let z = Double(parts[4]) else { return }
         lastSampleTime = t
+        if let movement, let reason = movement.process(t: t, x: x, y: y, z: z) {
+            onMovement?(reason.description)
+        }
         if let tap = detector.process(t: t, x: x, y: y, z: z) {
             onTap?(tap)
         }

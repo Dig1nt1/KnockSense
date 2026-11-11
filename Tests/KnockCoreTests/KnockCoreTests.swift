@@ -272,6 +272,11 @@ final class PatternTests: XCTestCase {
         XCTAssertTrue(config.autoCheckUpdates)
         XCTAssertTrue(config.verifyKnocks)
         XCTAssertTrue(config.requireConsistentPatterns)
+        XCTAssertEqual(config.guardSettings, GuardSettings())
+        let topic = GuardSettings.randomTopic()
+        XCTAssertTrue(topic.hasPrefix("knocksense-"))
+        XCTAssertEqual(topic.count, 27)
+        XCTAssertNotEqual(topic, GuardSettings.randomTopic())
         // Areas saved by older versions have samples but no peaks.
         let oldZone = #"{"zones":[{"id":"5F3B1C2A-1111-4222-8333-944455556666","name":"Lid","samples":[[1,2],[3,4]]}]}"#
         let withZone = try JSONDecoder().decode(AppConfig.self, from: Data(oldZone.utf8))
@@ -555,6 +560,53 @@ final class MotionSensorTests: XCTestCase {
         let b = SoundSample(features: [-0.2, 0.3, -0.9], peak: 0.12)
         XCTAssertTrue(PatternConsistency.isConsistent([a, b]))
         XCTAssertEqual(KnockVerifier.verify(a, knocks: [b, b, b, b, b], rejected: []), .notTrained)
+    }
+}
+
+final class MovementDetectorTests: XCTestCase {
+    private func run(_ samples: [(Double, Double, Double, Double)]) -> [MovementReason] {
+        let detector = MovementDetector()
+        return samples.compactMap { detector.process(t: $0.0, x: $0.1, y: $0.2, z: $0.3) }
+    }
+
+    func testStillMacDoesNotTrigger() {
+        var m = MotionSynth()
+        XCTAssertTrue(run(m.samples(duration: 6)).isEmpty)
+    }
+
+    func testTypingAndKnocksNearbyDoNotTrigger() {
+        var m = MotionSynth()
+        let keys = stride(from: 1.5, to: 5.5, by: 0.1).map { $0 }
+        let taps = [(2.0, 0.15, (0.0, 0.0, -1.0)), (3.0, 0.2, (0.0, 0.0, -1.0))]
+        XCTAssertTrue(run(m.samples(duration: 6, taps: taps, typing: keys)).isEmpty)
+    }
+
+    func testPickingUpTheMacTriggersOnce() {
+        var m = MotionSynth()
+        let reasons = run(m.samples(duration: 6, lift: (2.0, 5.0)))
+        XCTAssertEqual(reasons.count, 1)
+    }
+
+    func testSlowlyTiltingTheMacTriggers() {
+        // Tilt by 12° over 2 s (someone gently sliding the lid / lifting one side).
+        var samples: [(Double, Double, Double, Double)] = []
+        for i in 0..<Int(6 * 800.0) {
+            let t = Double(i) / 800
+            let angle = t < 2 ? 0 : min(12, (t - 2) * 6) * .pi / 180
+            samples.append((t, sin(angle), 0, -cos(angle)))
+        }
+        let reasons = run(samples)
+        XCTAssertEqual(reasons.count, 1)
+        if case .tilted(let degrees)? = reasons.first { XCTAssertGreaterThan(degrees, 6) } else { XCTFail("expected tilt") }
+    }
+
+    func testResetRearms() {
+        let detector = MovementDetector()
+        var m = MotionSynth()
+        let lift = m.samples(duration: 6, lift: (2.0, 5.0))
+        XCTAssertEqual(lift.compactMap { detector.process(t: $0.0, x: $0.1, y: $0.2, z: $0.3) }.count, 1)
+        detector.reset()
+        XCTAssertEqual(lift.compactMap { detector.process(t: $0.0 + 10, x: $0.1, y: $0.2, z: $0.3) }.count, 1)
     }
 }
 

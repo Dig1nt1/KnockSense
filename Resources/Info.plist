@@ -30,6 +30,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>KnockSense listens for knocks on your Mac through the built-in microphones. Audio is analysed on your Mac in real time and is never recorded or sent anywhere.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Laptop Guard takes a photo with the camera when someone moves or touches your Mac while it is armed. Photos are saved in your Pictures folder.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>KnockSense uses automation to run the actions you assign to knocks, such as locking the screen or running your AppleScripts.</string>
 </dict>

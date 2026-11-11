@@ -112,6 +112,27 @@ change in a future macOS update; if it stops working, switch back to the microph
 
 Areas work in this mode too: knocks on different spots push the Mac in different directions.
 
+## Laptop Guard
+
+Leaving your Mac in a café or library? Click the menu-bar icon → **Laptop Guard → Arm**. After a
+10-second countdown the screen locks and the guard watches for:
+
+* the Mac being **moved or picked up** (motion sensor; needs the motion helper),
+* the **keyboard or trackpad** being used,
+* the **charger** being unplugged,
+* the **lid** being closed.
+
+If something happens it immediately takes a **webcam photo** (saved to *Pictures ▸ KnockSense Guard*).
+After a grace period (5 s by default) it sounds a **siren at full volume through the Mac's speakers**
+and pushes an **alert with the photo to your phone**. **Unlock your Mac** (Touch ID or password) to
+turn it off.
+
+Phone alerts use [ntfy](https://ntfy.sh), a free push app: install it on your iPhone, subscribe to
+the secret topic shown in Settings ▸ Guard (or scan the QR code) and press **Send Test Alert**.
+
+Limits: Apple doesn't let apps keep a Mac awake with the lid closed, so closing the lid pauses the
+alarm. It starts again, and an alert is sent, as soon as the lid is reopened.
+
 ## How it works
 
 The Apple Silicon MacBook motion sensor has no public API. Reading it needs root and undocumented

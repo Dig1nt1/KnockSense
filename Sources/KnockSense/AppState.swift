@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import KnockCore
 import ServiceManagement
 
@@ -76,6 +77,8 @@ final class AppState: ObservableObject {
     @Published private(set) var zoneAccuracy: Double?
     let levelModel = LevelModel()
     let updater = Updater()
+    let guardian = LaptopGuard()
+    private var guardianLink: AnyCancellable?
     @Published private(set) var motionState: MotionSensor.State = .stopped
     @Published private(set) var helperInstalled = MotionHelperInstaller.isInstalled
     @Published private(set) var helperMessage: String?
@@ -127,8 +130,22 @@ final class AppState: ObservableObject {
 
         motion.onTap = { [weak self] tap in
             guard let state = self else { return }
-            Task { @MainActor in state.handleKnock(peak: Float(tap.peak), features: tap.features) }
+            Task { @MainActor in
+                // The sensor may also be running just for Laptop Guard while the microphone is in use.
+                guard state.config.detectionSource == .motion else { return }
+                state.handleKnock(peak: Float(tap.peak), features: tap.features)
+            }
         }
+        motion.onMovement = { [weak self] description in
+            guard let state = self else { return }
+            Task { @MainActor in state.guardian.motionDetected(description) }
+        }
+
+        guardian.settings = { [weak self] in self?.config.guardSettings ?? GuardSettings() }
+        guardian.log = { [weak self] message in self?.appendLog(message) }
+        guardian.setMotionWatch = { [weak self] on in self?.setGuardMotionWatch(on) }
+        // Let views watching AppState (menu bar icon, menu) update when the guard changes.
+        guardianLink = guardian.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         motion.onLevel = { [weak self] value in
             guard let state = self else { return }
             Task { @MainActor in state.levelModel.level = value }
@@ -275,10 +292,21 @@ final class AppState: ObservableObject {
 
     private func motionStateChanged(_ newState: MotionSensor.State) {
         motionState = newState
+        helperInstalled = MotionHelperInstaller.isInstalled
         guard config.detectionSource == .motion else { return }
         listening = newState == .streaming
-        helperInstalled = MotionHelperInstaller.isInstalled
         if newState == .streaming { appendLog("Motion sensor connected") }
+    }
+
+    /// Laptop Guard uses the motion sensor even when knocks come from the microphone.
+    private func setGuardMotionWatch(_ on: Bool) {
+        motion.setMovementWatch(on)
+        guard config.detectionSource != .motion else { return }
+        if on {
+            if helperInstalled || MotionHelperInstaller.isInstalled { motion.start() }
+        } else {
+            motion.stop()
+        }
     }
 
     // MARK: - Motion helper
@@ -323,6 +351,7 @@ final class AppState: ObservableObject {
     private func handleKnock(peak: Float, features: [Double]) {
         let now = ProcessInfo.processInfo.systemUptime
         guard config.enabled, now >= suppressUntil, !features.isEmpty else { return }
+        guard !guardian.isActive else { return }      // no knock actions while Laptop Guard is armed
         if config.ignoreWhileTyping && training == nil && InputActivity.secondsSinceLastInput() < 0.35 {
             return
         }

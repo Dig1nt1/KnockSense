@@ -175,6 +175,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var knockPeaks: [Double] = []
     /// Sounds the user marked with "That wasn't me".
     public var rejectedSounds: [[Double]] = []
+    public var guardSettings = GuardSettings()
     public var rules: [Rule] = []
     public var zones: [Zone] = []
 
@@ -199,7 +200,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates
-        case detectionSource, verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, rules, zones
+        case detectionSource, verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, guardSettings, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -218,6 +219,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knockSamples = try c.decodeIfPresent([[Double]].self, forKey: .knockSamples) ?? []
         knockPeaks = try c.decodeIfPresent([Double].self, forKey: .knockPeaks) ?? []
         rejectedSounds = try c.decodeIfPresent([[Double]].self, forKey: .rejectedSounds) ?? []
+        guardSettings = (try? c.decodeIfPresent(GuardSettings.self, forKey: .guardSettings)) ?? GuardSettings()
         rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
         zones = try c.decodeIfPresent([Zone].self, forKey: .zones) ?? []
     }

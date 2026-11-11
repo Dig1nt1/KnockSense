@@ -9,6 +9,8 @@ struct SettingsView: View {
                 .tabItem { Label("Actions", systemImage: "bolt.fill") }
             ZonesView()
                 .tabItem { Label("Areas", systemImage: "square.grid.2x2") }
+            GuardTab()
+                .tabItem { Label("Guard", systemImage: "lock.shield") }
             GeneralView()
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
@@ -266,6 +268,15 @@ struct MotionHelperRow: View {
         case .stopped, .connecting: return .yellow
         default: return .red
         }
+    }
+}
+
+/// Settings tab wrapper so the guard view can observe the LaptopGuard object directly.
+struct GuardTab: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        GuardSettingsView(guardian: state.guardian)
     }
 }
 

@@ -17,6 +17,8 @@ struct KnockSenseApp: App {
     }
 
     private var menuBarSymbol: String {
+        if state.guardian.isAlarming { return "exclamationmark.shield.fill" }
+        if state.guardian.isActive { return "lock.shield.fill" }
         if state.flash { return "hand.tap.fill" }
         return state.listening && state.config.enabled ? "hand.tap" : "hand.raised.slash"
     }

@@ -73,6 +73,8 @@ struct MenuView: View {
             }
 
             Divider()
+            GuardMenuRow(guardian: state.guardian)
+            Divider()
             UpdateControls(updater: state.updater, compact: true)
             Divider()
             HStack {
