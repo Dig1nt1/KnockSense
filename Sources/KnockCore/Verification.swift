@@ -24,6 +24,9 @@ public enum PatternConsistency {
         guard knocks.count >= 2 else { return true }
         let peaks = knocks.map(\.peak)
         if let lo = peaks.min(), let hi = peaks.max(), lo > 0, hi / lo > maximumPeakRatio { return false }
+        // Tone shape only exists for microphone fingerprints; motion-sensor knocks are checked on
+        // loudness alone (a door can't shake the Mac anyway).
+        guard knocks.allSatisfy({ $0.features.count >= FeatureExtractor.bandCount }) else { return true }
         let shapes = knocks.map { Array($0.features.prefix(FeatureExtractor.bandCount)) }
         for i in 0..<shapes.count {
             for j in (i + 1)..<shapes.count where correlation(shapes[i], shapes[j]) < minimumShapeCorrelation {

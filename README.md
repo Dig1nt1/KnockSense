@@ -98,6 +98,20 @@ permissions again after you rebuild it.
 * **That wasn't me:** if something still sets it off, click **That wasn't me** in the menu (shown
   for a minute after an action runs) and sounds like that are ignored from then on.
 
+## Motion-sensor mode (beta)
+
+On Apple Silicon MacBooks (M2 or newer) KnockSense can feel knocks through the built-in motion
+sensor instead of listening. Doors, voices and music can't trigger it, and the microphone stays off.
+
+Settings ▸ General ▸ **Sense knocks with: Motion sensor**, then **Install Helper…** and enter your
+admin password once. Apple has no public API for this sensor, so a small helper
+(`/Library/PrivilegedHelperTools/com.knocksense.imu`, run by launchd as root) reads it and streams the
+readings to KnockSense over `/var/run/knocksense-imu.sock`. The sensor is only switched on while
+KnockSense is connected. **Remove Helper…** uninstalls it. The interface is undocumented and could
+change in a future macOS update; if it stops working, switch back to the microphone.
+
+Areas work in this mode too: knocks on different spots push the Mac in different directions.
+
 ## How it works
 
 The Apple Silicon MacBook motion sensor has no public API. Reading it needs root and undocumented

@@ -9,6 +9,8 @@ let package = Package(
         .target(name: "KnockCore"),
         // The macOS menu-bar app.
         .executableTarget(name: "KnockSense", dependencies: ["KnockCore"]),
+        // Root helper that reads the MacBook's motion sensor (installed on demand as a LaunchDaemon).
+        .executableTarget(name: "KnockSenseIMU"),
         .testTarget(name: "KnockCoreTests", dependencies: ["KnockCore"]),
     ]
 )

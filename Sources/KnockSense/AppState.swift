@@ -76,9 +76,13 @@ final class AppState: ObservableObject {
     @Published private(set) var zoneAccuracy: Double?
     let levelModel = LevelModel()
     let updater = Updater()
+    @Published private(set) var motionState: MotionSensor.State = .stopped
+    @Published private(set) var helperInstalled = MotionHelperInstaller.isInstalled
+    @Published private(set) var helperMessage: String?
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
+    private let motion: MotionSensor
     private let grouper: PatternGrouper
     private var pollTask: Task<Void, Never>?
     private var flashTask: Task<Void, Never>?
@@ -96,6 +100,7 @@ final class AppState: ObservableObject {
         config = initial
         audio = AudioPipeline(params: .forSensitivity(initial.sensitivity))
         audio.preferBuiltInMic = initial.useBuiltInMic
+        motion = MotionSensor(params: .forSensitivity(initial.sensitivity))
         grouper = PatternGrouper(gap: initial.knockGap, maxCount: RuleMatcher.maxKnockCount(in: initial.rules))
         zoneAccuracy = ZoneClassifier.selfTestAccuracy(zones: initial.zones)
 
@@ -113,6 +118,19 @@ final class AppState: ObservableObject {
         audio.onRestart = { [weak self] error in
             guard let state = self else { return }
             Task { @MainActor in state.audioRestarted(error: error) }
+        }
+
+        motion.onTap = { [weak self] tap in
+            guard let state = self else { return }
+            Task { @MainActor in state.handleKnock(peak: Float(tap.peak), features: tap.features) }
+        }
+        motion.onLevel = { [weak self] value in
+            guard let state = self else { return }
+            Task { @MainActor in state.levelModel.level = value }
+        }
+        motion.onState = { [weak self] newState in
+            guard let state = self else { return }
+            Task { @MainActor in state.motionStateChanged(newState) }
         }
 
         pollTask = Task { @MainActor [weak self] in
@@ -137,6 +155,12 @@ final class AppState: ObservableObject {
     // MARK: - Listening
 
     func startListening() {
+        if config.detectionSource == .motion {
+            engineError = nil
+            inputDescription = "MacBook motion sensor"
+            motion.start()
+            return
+        }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             micStatus = .authorized
@@ -155,10 +179,37 @@ final class AppState: ObservableObject {
 
     func stopListening() {
         audio.stop()
+        motion.stop()
         listening = false
         levelModel.level = 0
         grouper.reset()
         pendingKnocks = []
+    }
+
+    private func motionStateChanged(_ newState: MotionSensor.State) {
+        motionState = newState
+        guard config.detectionSource == .motion else { return }
+        listening = newState == .streaming
+        helperInstalled = MotionHelperInstaller.isInstalled
+        if newState == .streaming { appendLog("Motion sensor connected") }
+    }
+
+    // MARK: - Motion helper
+
+    func installMotionHelper() {
+        let error = MotionHelperInstaller.install()
+        helperInstalled = MotionHelperInstaller.isInstalled
+        helperMessage = error ?? "Helper installed. Connecting to the motion sensor…"
+        if error == nil, config.enabled, config.detectionSource == .motion {
+            motion.stop()
+            motion.start()
+        }
+    }
+
+    func uninstallMotionHelper() {
+        let error = MotionHelperInstaller.uninstall()
+        helperInstalled = MotionHelperInstaller.isInstalled
+        helperMessage = error ?? "Helper removed."
     }
 
     private func startEngine() {
@@ -322,6 +373,7 @@ final class AppState: ObservableObject {
     private func configDidChange(from old: AppConfig) {
         if config.sensitivity != old.sensitivity {
             audio.updateParams(.forSensitivity(config.sensitivity))
+            motion.updateParams(.forSensitivity(config.sensitivity))
         }
         grouper.gap = config.knockGap
         grouper.maxCount = RuleMatcher.maxKnockCount(in: config.rules)
@@ -330,6 +382,12 @@ final class AppState: ObservableObject {
         }
         if config.enabled != old.enabled {
             if config.enabled { startListening() } else { stopListening() }
+        } else if config.detectionSource != old.detectionSource {
+            appendLog(config.detectionSource == .motion ? "Switched to the motion sensor" : "Switched to the microphone")
+            if config.enabled {
+                stopListening()
+                startListening()
+            }
         } else if config.useBuiltInMic != old.useBuiltInMic {
             audio.preferBuiltInMic = config.useBuiltInMic
             if listening {

@@ -94,7 +94,7 @@ struct StatusLine: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(text).font(.caption)
             Spacer()
-            if state.micStatus == .denied {
+            if state.config.detectionSource == .microphone && state.micStatus == .denied {
                 Button("Open Settings") { Permissions.openMicrophoneSettings() }
                     .font(.caption)
             }
@@ -103,6 +103,14 @@ struct StatusLine: View {
 
     private var color: Color {
         if !state.config.enabled { return .gray }
+        if state.config.detectionSource == .motion {
+            if state.training != nil { return .orange }
+            switch state.motionState {
+            case .streaming: return .green
+            case .connecting, .stopped: return .yellow
+            default: return .red
+            }
+        }
         if state.micStatus == .denied || state.engineError != nil { return .red }
         if state.training != nil { return .orange }
         return state.listening ? .green : .yellow
@@ -110,6 +118,16 @@ struct StatusLine: View {
 
     private var text: String {
         if !state.config.enabled { return "Paused" }
+        if state.config.detectionSource == .motion, state.training == nil, !state.testMode {
+            switch state.motionState {
+            case .streaming: return "Feeling for knocks (motion sensor)"
+            case .stopped, .connecting: return "Connecting to the motion sensor…"
+            case .helperNotRunning: return "Motion helper not installed — see Settings"
+            case .noSensor: return "No motion sensor found on this Mac"
+            case .helperOutdated: return "Motion helper needs an update — see Settings"
+            case .error(let message): return message
+            }
+        }
         if state.micStatus == .denied { return "Microphone access denied" }
         if let error = state.engineError { return error }
         if let session = state.training {

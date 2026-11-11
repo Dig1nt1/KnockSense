@@ -29,6 +29,13 @@ struct GeneralView: View {
         Form {
             Section("Detection") {
                 Toggle("Listen for knocks", isOn: $state.config.enabled)
+                Picker("Sense knocks with", selection: $state.config.detectionSource) {
+                    Text("Microphone").tag(DetectionSource.microphone)
+                    Text("Motion sensor (beta)").tag(DetectionSource.motion)
+                }
+                if state.config.detectionSource == .motion {
+                    MotionHelperRow()
+                }
                 VStack(alignment: .leading) {
                     HStack {
                         Text("Sensitivity")
@@ -192,3 +199,59 @@ struct GeneralView: View {
         return "Not taught yet. Click Teach My Knock, then knock \(AppState.knockTrainingKnocks) times on your Mac the way you normally will."
     }
 }
+
+/// Status and install controls for the motion-sensor helper.
+struct MotionHelperRow: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Feels knocks through the MacBook's built-in motion sensor, so doors, voices and music can't set it off and the microphone stays off. Needs an Apple Silicon MacBook (M2 or newer) and your admin password once, to install a small background helper. Apple doesn't officially support reading this sensor, so a macOS update could break it.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Circle().fill(statusColor).frame(width: 8, height: 8)
+                Text(statusText).font(.callout)
+                Spacer()
+                if needsInstall {
+                    Button(state.helperInstalled ? "Update Helper…" : "Install Helper…") { state.installMotionHelper() }
+                        .buttonStyle(.borderedProminent)
+                }
+                if state.helperInstalled {
+                    Button("Remove Helper…") { state.uninstallMotionHelper() }
+                }
+            }
+            if let message = state.helperMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var needsInstall: Bool {
+        switch state.motionState {
+        case .helperNotRunning, .helperOutdated: return true
+        default: return !state.helperInstalled
+        }
+    }
+
+    private var statusText: String {
+        switch state.motionState {
+        case .streaming: return "Motion sensor active"
+        case .stopped: return state.config.enabled ? "Starting…" : "Paused"
+        case .connecting: return "Connecting…"
+        case .helperNotRunning: return state.helperInstalled ? "Helper installed but not running" : "Helper not installed"
+        case .noSensor: return "This Mac has no supported motion sensor — use the microphone instead"
+        case .helperOutdated(let installed): return "Helper is out of date (v\(installed))"
+        case .error(let message): return message
+        }
+    }
+
+    private var statusColor: Color {
+        switch state.motionState {
+        case .streaming: return .green
+        case .stopped, .connecting: return .yellow
+        default: return .red
+        }
+    }
+}
+

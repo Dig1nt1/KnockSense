@@ -40,6 +40,20 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test motion helper (starts as root and answers)
+        run: |
+          HELPER=build/KnockSense.app/Contents/Helpers/knocksense-imu
+          "$HELPER" --version
+          sudo "$HELPER" &
+          sleep 2
+          HELLO=$( (sleep 2) | nc -U /var/run/knocksense-imu.sock | head -1 )
+          echo "Helper said: $HELLO"
+          sudo pkill -f knocksense-imu || true
+          case "$HELLO" in
+            "KSIMU 1 "*) echo "OK: helper protocol works" ;;
+            *) echo "ERROR: unexpected helper reply"; exit 1 ;;
+          esac
+
       - name: Zip app and write update manifest
         run: |
           cd build

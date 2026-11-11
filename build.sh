@@ -22,6 +22,9 @@ echo "==> Assembling ${APP}..."
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
+mkdir -p "${APP}/Contents/Helpers"
+cp "${BIN_DIR}/KnockSenseIMU" "${APP}/Contents/Helpers/knocksense-imu"
+cp Resources/com.knocksense.imu.plist "${APP}/Contents/Resources/"
 cp Resources/Info.plist "${APP}/Contents/Info.plist"
 # CI passes the build number so the in-app updater can tell versions apart (local builds stay 0).
 if [[ -n "${BUILD_NUMBER:-}" ]]; then
@@ -41,6 +44,7 @@ if [[ -f Resources/AppIcon.png ]]; then
 fi
 
 # Ad-hoc signature (or your Developer ID: SIGN_IDENTITY="Developer ID Application: ........." ./build.sh)
+codesign --force --sign "${SIGN_IDENTITY:--}" "${APP}/Contents/Helpers/knocksense-imu"
 codesign --force --sign "${SIGN_IDENTITY:--}" "${APP}"
 echo "==> Built ${APP}"
 

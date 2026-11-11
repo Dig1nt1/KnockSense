@@ -456,3 +456,101 @@ final class FalseTriggerTests: XCTestCase {
         XCTAssertEqual(KnockVerifier.verify(sound, knocks: [], rejected: []), .notTrained)
     }
 }
+
+/// Simulated accelerometer: 800 Hz, gravity mostly on −z, 2 mg sensor noise.
+struct MotionSynth {
+    var seed: UInt64 = 0xABCDEF
+    let rate = 800.0
+
+    mutating func noise() -> Double {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Double(seed >> 11) / Double(UInt64(1) << 53) * 2 - 1
+    }
+
+    /// Returns samples (t, x, y, z).
+    mutating func samples(duration: Double,
+                          taps: [(t: Double, amp: Double, dir: (Double, Double, Double))] = [],
+                          typing: [Double] = [],
+                          lift: (start: Double, end: Double)? = nil) -> [(Double, Double, Double, Double)] {
+        let n = Int(duration * rate)
+        var out: [(Double, Double, Double, Double)] = []
+        out.reserveCapacity(n)
+        for i in 0..<n {
+            let t = Double(i) / rate
+            var x = 0.05 + noise() * 0.002, y = 0.02 + noise() * 0.002, z = -0.998 + noise() * 0.002
+            for tap in taps where t >= tap.t && t < tap.t + 0.1 {
+                let tt = t - tap.t
+                let v = tap.amp * exp(-tt / 0.006) * sin(2 * .pi * 230 * tt + 0.3)
+                x += v * tap.dir.0; y += v * tap.dir.1; z += v * tap.dir.2
+            }
+            for k in typing where t >= k && t < k + 0.03 {        // key presses: tiny vibrations
+                let tt = t - k
+                z += 0.006 * exp(-tt / 0.004) * sin(2 * .pi * 300 * tt)
+            }
+            if let lift, t >= lift.start && t < lift.end {       // picking up and carrying the Mac
+                let tt = t - lift.start
+                z += 0.25 * sin(2 * .pi * 1.2 * tt) + 0.05 * sin(2 * .pi * 7 * tt)
+                x += 0.15 * sin(2 * .pi * 0.8 * tt)
+            }
+            out.append((t, x, y, z))
+        }
+        return out
+    }
+}
+
+private func detectTaps(_ samples: [(Double, Double, Double, Double)], sensitivity: Double = 0.5) -> [TapEvent] {
+    let detector = TapDetector(params: .forSensitivity(sensitivity))
+    return samples.compactMap { detector.process(t: $0.0, x: $0.1, y: $0.2, z: $0.3) }
+}
+
+final class MotionSensorTests: XCTestCase {
+    func testDetectsKnocksIncludingFastDoubleKnock() {
+        var m = MotionSynth()
+        let down = (0.1, 0.0, -0.99)
+        let taps = detectTaps(m.samples(duration: 4, taps: [(1.0, 0.15, down), (1.2, 0.12, down), (2.5, 0.2, down), (3.0, 0.1, down)]))
+        XCTAssertEqual(taps.count, 4)
+        XCTAssertEqual(taps.first?.time ?? 0, 1.0, accuracy: 0.01)
+    }
+
+    func testTypingIsNotAKnock() {
+        var m = MotionSynth()
+        let keys = stride(from: 0.5, to: 3.5, by: 0.12).map { $0 }
+        XCTAssertEqual(detectTaps(m.samples(duration: 4, typing: keys)).count, 0)
+    }
+
+    func testLiftingAndCarryingIsNotAKnock() {
+        var m = MotionSynth()
+        XCTAssertEqual(detectTaps(m.samples(duration: 5, lift: (1.0, 4.0))).count, 0)
+    }
+
+    func testSensitivityControlsLightTaps() {
+        var m = MotionSynth()
+        let light = m.samples(duration: 2, taps: [(1.0, 0.02, (0, 0, -1))])
+        XCTAssertEqual(detectTaps(light, sensitivity: 0.2).count, 0)
+        XCTAssertEqual(detectTaps(light, sensitivity: 1).count, 1)
+    }
+
+    func testDirectionTellsAreasApart() {
+        var m = MotionSynth()
+        let left = (-0.6, 0.1, -0.79), lid = (0.0, 0.95, -0.3)
+        func taps(_ dir: (Double, Double, Double), _ count: Int) -> [TapEvent] {
+            let times = (0..<count).map { 0.5 + Double($0) * 0.4 }
+            return detectTaps(m.samples(duration: 0.5 + Double(count) * 0.4 + 0.3,
+                                        taps: times.enumerated().map { (i, t) in (t, 0.1 + Double(i % 3) * 0.03, dir) }))
+        }
+        let leftID = UUID(), lidID = UUID()
+        let zones = [Zone(id: leftID, name: "Left", samples: taps(left, 6).map(\.features)),
+                     Zone(id: lidID, name: "Lid", samples: taps(lid, 6).map(\.features))]
+        XCTAssertEqual(zones[0].samples.count, 6)
+        for t in taps(left, 3) { XCTAssertEqual(ZoneClassifier.classify(t.features, zones: zones)?.zoneID, leftID) }
+        for t in taps(lid, 3) { XCTAssertEqual(ZoneClassifier.classify(t.features, zones: zones)?.zoneID, lidID) }
+    }
+
+    func testMotionKnocksSkipMicrophoneOnlyChecks() {
+        let a = SoundSample(features: [0.1, 0.0, -0.99], peak: 0.1)
+        let b = SoundSample(features: [-0.2, 0.3, -0.9], peak: 0.12)
+        XCTAssertTrue(PatternConsistency.isConsistent([a, b]))
+        XCTAssertEqual(KnockVerifier.verify(a, knocks: [b, b, b, b, b], rejected: []), .notTrained)
+    }
+}
+

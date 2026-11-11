@@ -144,8 +144,17 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// How KnockSense senses knocks.
+public enum DetectionSource: String, Codable, CaseIterable, Sendable {
+    /// Built-in microphones (works on every Mac).
+    case microphone
+    /// The MacBook's motion sensor via the root helper (Apple Silicon MacBook, M2 or newer).
+    case motion
+}
+
 public struct AppConfig: Codable, Equatable, Sendable {
     public var enabled = true
+    public var detectionSource: DetectionSource = .microphone
     /// 0 = only hard knocks, 1 = very light taps.
     public var sensitivity = 0.5
     /// Max seconds between knocks that belong to the same pattern.
@@ -190,7 +199,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates
-        case verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, rules, zones
+        case detectionSource, verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -204,6 +213,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         useBuiltInMic = try c.decodeIfPresent(Bool.self, forKey: .useBuiltInMic) ?? true
         autoCheckUpdates = try c.decodeIfPresent(Bool.self, forKey: .autoCheckUpdates) ?? true
         verifyKnocks = try c.decodeIfPresent(Bool.self, forKey: .verifyKnocks) ?? true
+        detectionSource = (try? c.decodeIfPresent(DetectionSource.self, forKey: .detectionSource)) ?? .microphone
         requireConsistentPatterns = try c.decodeIfPresent(Bool.self, forKey: .requireConsistentPatterns) ?? true
         knockSamples = try c.decodeIfPresent([[Double]].self, forKey: .knockSamples) ?? []
         knockPeaks = try c.decodeIfPresent([Double].self, forKey: .knockPeaks) ?? []
