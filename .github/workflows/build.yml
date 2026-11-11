@@ -8,9 +8,15 @@ on:
 permissions:
   contents: write
 
+# A newer push cancels an older, still-running build.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -41,12 +47,14 @@ jobs:
           fi
 
       - name: Smoke test motion helper (starts as root and answers)
+        timeout-minutes: 2
         run: |
           HELPER=build/KnockSense.app/Contents/Helpers/knocksense-imu
           "$HELPER" --version
           sudo "$HELPER" &
           sleep 2
-          HELLO=$( (sleep 2) | nc -U /var/run/knocksense-imu.sock | head -1 )
+          # -w 3: give up after 3 s of silence (there's no sensor on CI, so no samples follow the hello line).
+          HELLO=$(nc -U -w 3 /var/run/knocksense-imu.sock < /dev/null | head -1)
           echo "Helper said: $HELLO"
           sudo pkill -f knocksense-imu || true
           case "$HELLO" in
