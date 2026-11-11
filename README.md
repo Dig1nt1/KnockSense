@@ -1,0 +1,139 @@
+# KnockSense
+
+Knock on your Mac to make it do things. Knock twice to play or pause music, three times to open
+Mission Control, or knock on the lid to lock the screen. Every action is up to you.
+
+KnockSense is a small menu-bar app (look for the ✋ icon) for macOS 13 Ventura or later.
+
+## Download
+
+Get **KnockSense.zip** from the repository's [Releases](../../releases/latest) page. Unzip it and
+drag `KnockSense.app` into Applications.
+
+macOS blocks apps that aren't from the App Store or a registered developer the first time you open
+them. To get past that once:
+
+* Right-click `KnockSense.app` → **Open** → **Open**, or
+* if there's no Open button: **System Settings ▸ Privacy & Security**, scroll down, click
+  **Open Anyway**.
+
+Or remove the download flag in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/KnockSense.app
+```
+
+## Build and install from source
+
+You need Apple's Swift tools. If you don't have Xcode, install the free Command Line Tools:
+
+```bash
+xcode-select --install
+```
+
+Then, in this folder:
+
+```bash
+./build.sh --install
+```
+
+That compiles the app, copies `KnockSense.app` into `/Applications` and starts it.
+(`./build.sh --run` builds into `./build` and starts it without installing.)
+
+On first launch macOS asks for **microphone** access. Click Allow.
+
+## Using it
+
+1. **Knock twice** on the palm rest next to the trackpad. The menu-bar icon flashes on each knock
+   and your music plays or pauses.
+2. Open **Settings…** from the menu-bar icon:
+   - **Actions:** add, edit, test or turn off rules. A rule is *knock N times (anywhere / on an
+     area) → do something*. Available actions:
+     - Built-ins: play/pause, next/previous track, volume up/down, mute, lock screen, sleep display,
+       screenshot, Mission Control, test notification
+     - Open any app, website or file
+     - Run a shell command, an AppleScript or a Shortcut from the Shortcuts app
+   - **Areas:** teach KnockSense the spots you knock on (left palm rest, right palm rest, lid…) so
+     each spot can do something different. Add an area, click **Train**, then knock 6 times on that
+     spot. Turn on **Test mode** to check which area it detects. The **self-test accuracy** score
+     shows how well your spots can be told apart.
+   - **General:** sensitivity, the time allowed between knocks, sounds, permissions and launch at
+     login.
+
+### Permissions
+
+| Permission | Why | When |
+|---|---|---|
+| Microphone | Hearing the knocks | Always required |
+| Accessibility | Media keys (play/pause, next/previous) and Lock screen | Only if you use those actions |
+| Automation ("System Events") | Lock screen and AppleScript actions | macOS asks the first time |
+| Screen Recording | Screenshot action | macOS asks the first time |
+
+Accessibility is granted in **System Settings ▸ Privacy & Security ▸ Accessibility**. The General
+tab has a shortcut button. Because the app is signed locally ("ad-hoc"), macOS may ask for
+permissions again after you rebuild it.
+
+## How it works
+
+The Apple Silicon MacBook motion sensor has no public API. Reading it needs root and undocumented
+hardware interfaces. KnockSense uses the **built-in microphones** instead. A knock travels through
+the aluminium case straight to the mics and makes a short, sharp sound that is easy to tell apart
+from speech or music. This works on every Mac model without admin rights.
+
+```
+mic audio ─▶ KnockDetector ─▶ FeatureExtractor ─▶ ZoneClassifier ─▶ PatternGrouper ─▶ RuleMatcher ─▶ ActionRunner
+             (onset + fast    (spectral shape,     (k-nearest        (1, 2, 3, 4       (area rule
+              decay check)     inter-mic cues)      neighbours)       knocks)           beats "anywhere")
+```
+
+* **Detection:** the audio is split into frames of about 5 ms. A frame counts as a knock onset when
+  it is much louder than the running noise floor, its peak passes the sensitivity threshold, and
+  the level jumped suddenly. 50 ms later the sound must have died away. Knocks fade fast; voices,
+  music and fans don't.
+* **Areas:** each knock is turned into a fingerprint: 16 frequency bands, brightness, decay speed,
+  and the level and timing differences between the built-in microphones. It is then matched
+  against your training knocks.
+* **Patterns:** knocks less than the "max time between knocks" apart are grouped. If no rule uses
+  more knocks than you've already made, the action fires right away with no waiting.
+* **False alarms:** knocks within 0.35 s of a key press or trackpad click are ignored. This uses
+  `CGEventSource` idle time and needs no permission. The app's own feedback sound is also ignored.
+
+**Privacy:** audio is processed in memory, in real time, on your Mac. Nothing is recorded, saved or
+sent anywhere. macOS shows the orange microphone dot while KnockSense is listening. Pause it from
+the menu at any time.
+
+## Tips
+
+* Knock with a knuckle, firmly. If knocks are missed, raise **Sensitivity**. If random noises
+  trigger actions, lower it.
+* Double and triple knocks are much more reliable than single knocks.
+* Area detection works best when the spots are far apart and on different parts of the case
+  (palm rest vs. lid vs. bottom). Train with the Mac where you normally use it.
+* Area training is tied to the current microphone. If you switch to an external mic, retrain.
+* A headset or external microphone won't pick up knocks on the case. Use the built-in mic.
+
+## Project layout
+
+```
+Package.swift
+Sources/KnockCore/        platform-independent signal processing + data model (unit-tested)
+  KnockDetector.swift       streaming knock detector
+  Features.swift            fingerprint extraction, FFT
+  Patterns.swift            area classifier, pattern grouping, rule matching
+  Models.swift              rules, actions, areas, config (Codable)
+Sources/KnockSense/       the macOS app (SwiftUI menu-bar app)
+  KnockSenseApp.swift       entry point, menu bar, settings window
+  AppState.swift            wires everything together, persistence
+  AudioPipeline.swift       AVAudioEngine microphone capture
+  ActionRunner.swift        runs actions, permissions helpers
+  Views/                    menu, actions, areas and general settings UI
+Tests/KnockCoreTests/     tests with synthetic knock / speech audio
+Resources/                Info.plist, app icon
+build.sh                  builds KnockSense.app
+```
+
+Run the tests with `swift test`. Settings are stored in
+`~/Library/Application Support/KnockSense/config.json`.
+
+To rename the app or use your own bundle ID, edit `Resources/Info.plist` (`CFBundleIdentifier`,
+`CFBundleName`).
