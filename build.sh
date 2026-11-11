@@ -23,6 +23,10 @@ rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 cp Resources/Info.plist "${APP}/Contents/Info.plist"
+# CI passes the build number so the in-app updater can tell versions apart (local builds stay 0).
+if [[ -n "${BUILD_NUMBER:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${APP}/Contents/Info.plist"
+fi
 
 # App icon: build AppIcon.icns from Resources/AppIcon.png (1024x1024) if present.
 if [[ -f Resources/AppIcon.png ]]; then

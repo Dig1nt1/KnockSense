@@ -49,6 +49,8 @@ struct MenuView: View {
             }
 
             Divider()
+            UpdateControls(updater: state.updater, compact: true)
+            Divider()
             HStack {
                 Button("Settings…") { SettingsWindowController.shared.show(state: state) }
                 Spacer()

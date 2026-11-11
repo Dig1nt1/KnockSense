@@ -21,28 +21,52 @@ jobs:
         run: swift test
 
       - name: Build app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: ./build.sh
 
-      - name: Zip app
-        run: cd build && ditto -c -k --keepParent KnockSense.app KnockSense.zip
+      - name: Zip app and write update manifest
+        run: |
+          cd build
+          ditto -c -k --keepParent KnockSense.app KnockSense.zip
+          SHA=$(shasum -a 256 KnockSense.zip | cut -d' ' -f1)
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" KnockSense.app/Contents/Info.plist)
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/KnockSense.zip"
+          printf '{"build": %s, "version": "%s", "commit": "%s", "sha256": "%s", "url": "%s"}\n' \
+            "${{ github.run_number }}" "$VERSION" "${GITHUB_SHA::7}" "$SHA" "$URL" > version.json
+          cat version.json
 
       - uses: actions/upload-artifact@v4
         with:
           name: KnockSense
-          path: build/KnockSense.zip
+          path: |
+            build/KnockSense.zip
+            build/version.json
 
       - name: Publish "latest" release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest build/KnockSense.zip \
-            --title "KnockSense (latest build)" \
-            --notes "Download **KnockSense.zip**, unzip it and drag KnockSense.app into Applications.
+          NOTES="Download **KnockSense.zip**, unzip it and drag KnockSense.app into Applications.
 
           The first time, macOS will block it because it isn't from the App Store. To open it:
           - Right-click KnockSense.app → **Open** → **Open**, or
           - If there's no Open button: System Settings → Privacy & Security → scroll down → **Open Anyway**.
 
-          Built from commit ${GITHUB_SHA::7}."
+          Already installed? Use **Check for Updates** in the KnockSense menu instead.
+
+          Build ${{ github.run_number }} from commit ${GITHUB_SHA::7}."
+          # Point the tag at this commit, then replace the files in place (no window where the
+          # update manifest is missing).
+          git tag -f latest
+          git push -f origin refs/tags/latest
+          if gh release view latest >/dev/null 2>&1; then
+            # Upload the zip first and the manifest last, so the manifest never points at an old zip.
+            gh release upload latest build/KnockSense.zip --clobber
+            gh release upload latest build/version.json --clobber
+            gh release edit latest --title "KnockSense (latest build)" --notes "$NOTES"
+          else
+            gh release create latest build/KnockSense.zip build/version.json \
+              --title "KnockSense (latest build)" --notes "$NOTES"
+          fi

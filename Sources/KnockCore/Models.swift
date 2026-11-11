@@ -134,6 +134,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var ignoreWhileTyping = true
     /// Listen through the Mac's built-in mic even when AirPods / a headset are the default input.
     public var useBuiltInMic = true
+    /// Look for new versions in the background and announce them in the menu.
+    public var autoCheckUpdates = true
     public var rules: [Rule] = []
     public var zones: [Zone] = []
 
@@ -149,7 +151,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, rules, zones
+        case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -161,6 +163,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         playSound = try c.decodeIfPresent(Bool.self, forKey: .playSound) ?? true
         ignoreWhileTyping = try c.decodeIfPresent(Bool.self, forKey: .ignoreWhileTyping) ?? true
         useBuiltInMic = try c.decodeIfPresent(Bool.self, forKey: .useBuiltInMic) ?? true
+        autoCheckUpdates = try c.decodeIfPresent(Bool.self, forKey: .autoCheckUpdates) ?? true
         rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
         zones = try c.decodeIfPresent([Zone].self, forKey: .zones) ?? []
     }

@@ -94,6 +94,19 @@ struct GeneralView: View {
                 }
             }
 
+            Section("Updates") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(state.updater.versionText).foregroundStyle(.secondary)
+                }
+                Toggle("Check for updates automatically", isOn: $state.config.autoCheckUpdates)
+                UpdateControls(updater: state.updater)
+                Text("Updates come from the KnockSense GitHub releases and are checked against a checksum before installing. After an update, macOS may ask for microphone access again, and you may need to switch KnockSense off and on under Accessibility.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Startup") {
                 Toggle("Launch KnockSense at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { enabled in

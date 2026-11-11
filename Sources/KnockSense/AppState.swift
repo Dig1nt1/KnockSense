@@ -68,6 +68,7 @@ final class AppState: ObservableObject {
     @Published private(set) var inputDescription = "—"
     @Published private(set) var zoneAccuracy: Double?
     let levelModel = LevelModel()
+    let updater = Updater()
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
@@ -108,6 +109,8 @@ final class AppState: ObservableObject {
                 self?.poll()
             }
         }
+
+        updater.startAutomaticChecks { [weak self] in self?.config.autoCheckUpdates ?? false }
 
         if initial.enabled { startListening() }
         if loaded == nil {

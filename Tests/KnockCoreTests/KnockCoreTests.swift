@@ -269,8 +269,46 @@ final class PatternTests: XCTestCase {
         XCTAssertTrue(config.enabled)
         XCTAssertTrue(config.ignoreWhileTyping)
         XCTAssertTrue(config.useBuiltInMic)
+        XCTAssertTrue(config.autoCheckUpdates)
         let defaults = AppConfig.defaults
         let roundTrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(defaults))
         XCTAssertEqual(roundTrip, defaults)
     }
 }
+
+final class UpdateTests: XCTestCase {
+    private let sample = UpdateInfo(build: 7, version: "1.1.0", commit: "abc1234",
+                                    sha256: String(repeating: "a1", count: 32),
+                                    url: "https://github.com/owner/KnockSense/releases/download/latest/KnockSense.zip")
+
+    func testDecodesManifest() throws {
+        let json = #"{"build": 12, "version": "1.1.0", "commit": "74d51cd", "sha256": "\#(String(repeating: "0f", count: 32))", "url": "https://example.com/KnockSense.zip"}"#
+        let info = try JSONDecoder().decode(UpdateInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(info.build, 12)
+        XCTAssertTrue(UpdatePolicy.isValid(info))
+    }
+
+    func testNewerBuildOnly() {
+        XCTAssertTrue(UpdatePolicy.isNewer(sample, thanBuild: 6))
+        XCTAssertFalse(UpdatePolicy.isNewer(sample, thanBuild: 7))
+        XCTAssertFalse(UpdatePolicy.isNewer(sample, thanBuild: 9))
+        XCTAssertTrue(UpdatePolicy.isNewer(sample, thanBuild: 0))   // local builds always accept releases
+    }
+
+    func testRejectsBadManifests() {
+        let badHash = UpdateInfo(build: 7, version: "1", commit: "x", sha256: "nothex", url: sample.url)
+        let http = UpdateInfo(build: 7, version: "1", commit: "x", sha256: sample.sha256, url: "http://example.com/a.zip")
+        XCTAssertTrue(UpdatePolicy.isValid(sample))
+        XCTAssertFalse(UpdatePolicy.isValid(badHash))
+        XCTAssertFalse(UpdatePolicy.isValid(http))
+    }
+
+    func testInstallProblems() {
+        XCTAssertNil(UpdatePolicy.installProblem(appPath: "/Applications/KnockSense.app", parentIsWritable: true))
+        XCTAssertNotNil(UpdatePolicy.installProblem(appPath: "/Applications/KnockSense.app", parentIsWritable: false))
+        XCTAssertNotNil(UpdatePolicy.installProblem(
+            appPath: "/private/var/folders/xy/T/AppTranslocation/1234/d/KnockSense.app", parentIsWritable: true))
+        XCTAssertNotNil(UpdatePolicy.installProblem(appPath: "/usr/local/bin/KnockSense", parentIsWritable: true))
+    }
+}
+

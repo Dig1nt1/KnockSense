@@ -23,6 +23,18 @@ Or remove the download flag in Terminal:
 xattr -dr com.apple.quarantine /Applications/KnockSense.app
 ```
 
+## Updating
+
+Click the menu-bar icon → **Check for Updates**. If a newer build exists, KnockSense downloads it,
+checks it against the published SHA-256 checksum, replaces itself and restarts. It also checks
+quietly every few hours and shows **Install Update** in the menu when one is ready (turn this off in
+Settings ▸ General ▸ Updates).
+
+For this to work, KnockSense must be in a folder it can write to, such as Applications. It can't
+update an app opened straight from Downloads. Because builds are signed locally ("ad-hoc"), macOS
+may ask for microphone access again after an update, and you may need to switch KnockSense off and on
+under Accessibility.
+
 ## Build and install from source
 
 You need Apple's Swift tools. If you don't have Xcode, install the free Command Line Tools:
