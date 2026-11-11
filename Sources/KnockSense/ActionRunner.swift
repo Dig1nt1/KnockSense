@@ -54,6 +54,12 @@ enum ActionRunner {
             osascript(#"tell application "System Events" to keystroke "q" using {control down, command down}"#)
         case .sleepDisplay:
             launch("/usr/bin/pmset", ["displaysleepnow"])
+        case .screenshotToClipboard:
+            // -c: copy to clipboard instead of saving a file; -x: no shutter sound.
+            launch("/usr/sbin/screencapture", ["-c", "-x"])
+        case .screenshotAreaToClipboard:
+            // -i: drag to select an area (Space toggles window mode, Esc cancels).
+            launch("/usr/sbin/screencapture", ["-i", "-c"])
         case .screenshot:
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"

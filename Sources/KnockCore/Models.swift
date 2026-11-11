@@ -18,7 +18,8 @@ public struct Zone: Codable, Identifiable, Hashable, Sendable {
 public enum BuiltinAction: String, Codable, CaseIterable, Identifiable, Sendable {
     case playPause, nextTrack, previousTrack
     case volumeUp, volumeDown, toggleMute
-    case lockScreen, sleepDisplay, screenshot, missionControl
+    case lockScreen, sleepDisplay, missionControl
+    case screenshotToClipboard, screenshotAreaToClipboard, screenshot
     case notify
 
     public var id: String { rawValue }
@@ -33,7 +34,9 @@ public enum BuiltinAction: String, Codable, CaseIterable, Identifiable, Sendable
         case .toggleMute: return "Mute / Unmute"
         case .lockScreen: return "Lock screen"
         case .sleepDisplay: return "Sleep display"
-        case .screenshot: return "Screenshot to Desktop"
+        case .screenshotToClipboard: return "Screenshot to clipboard (whole screen)"
+        case .screenshotAreaToClipboard: return "Screenshot area to clipboard (drag to select)"
+        case .screenshot: return "Screenshot saved to Desktop"
         case .missionControl: return "Mission Control"
         case .notify: return "Show a notification (test)"
         }

@@ -312,3 +312,16 @@ final class UpdateTests: XCTestCase {
     }
 }
 
+final class BuiltinActionTests: XCTestCase {
+    func testScreenshotActionsAreDistinctAndOldRulesStillDecode() throws {
+        XCTAssertTrue(BuiltinAction.allCases.contains(.screenshotToClipboard))
+        XCTAssertTrue(BuiltinAction.allCases.contains(.screenshotAreaToClipboard))
+        XCTAssertEqual(Set(BuiltinAction.allCases.map(\.title)).count, BuiltinAction.allCases.count)
+        // Rules saved by older versions use the raw value "screenshot" and must keep working.
+        let json = #"{"kind":"builtin","argument":"screenshot"}"#
+        let action = try JSONDecoder().decode(KnockAction.self, from: Data(json.utf8))
+        XCTAssertEqual(BuiltinAction(rawValue: action.argument), .screenshot)
+        XCTAssertEqual(KnockAction.builtin(.screenshotToClipboard).summary, "Screenshot to clipboard (whole screen)")
+    }
+}
+

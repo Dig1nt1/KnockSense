@@ -62,7 +62,8 @@ On first launch macOS asks for **microphone** access. Click Allow.
    - **Actions:** add, edit, test or turn off rules. A rule is *knock N times (anywhere / on an
      area) → do something*. Available actions:
      - Built-ins: play/pause, next/previous track, volume up/down, mute, lock screen, sleep display,
-       screenshot, Mission Control, test notification
+       screenshot (to the clipboard, a dragged area to the clipboard, or saved to the Desktop),
+       Mission Control, test notification
      - Open any app, website or file
      - Run a shell command, an AppleScript or a Shortcut from the Shortcuts app
    - **Areas:** teach KnockSense the spots you knock on (left palm rest, right palm rest, lid…) so
