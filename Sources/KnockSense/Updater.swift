@@ -109,12 +109,16 @@ final class Updater: ObservableObject {
 
     func install(_ info: UpdateInfo) async {
         guard !(status == .downloading || status == .installing) else { return }
-        let target = Bundle.main.bundleURL
-        let parent = target.deletingLastPathComponent()
-        if let problem = UpdatePolicy.installProblem(
-            appPath: target.path,
-            parentIsWritable: FileManager.default.isWritableFile(atPath: parent.path)
+        let running = Bundle.main.bundleURL
+        let target: URL
+        switch UpdatePolicy.installPlan(
+            appPath: running.path,
+            parentIsWritable: FileManager.default.isWritableFile(atPath: running.deletingLastPathComponent().path),
+            applicationsIsWritable: FileManager.default.isWritableFile(atPath: "/Applications")
         ) {
+        case .replace(let path), .installInto(let path):
+            target = URL(fileURLWithPath: path)
+        case .impossible(let problem):
             status = .failed(problem)
             return
         }
@@ -127,7 +131,8 @@ final class Updater: ObservableObject {
         do {
             // Staging folder on the same volume as the app, so the final swap is a fast rename.
             let staging = try FileManager.default.url(
-                for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target, create: true
+                for: .itemReplacementDirectory, in: .userDomainMask,
+                appropriateFor: target.deletingLastPathComponent(), create: true
             )
             let (downloaded, response) = try await URLSession.shared.download(from: zipURL)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -163,13 +168,17 @@ final class Updater: ObservableObject {
     private func relaunch(replacing target: URL, with newApp: URL, staging: URL) throws {
         let script = """
         while /bin/kill -0 "$1" 2>/dev/null; do /bin/sleep 0.2; done
-        /bin/rm -rf "$2.previous"
-        if /bin/mv "$2" "$2.previous"; then
-          if /bin/mv "$3" "$2"; then
-            /bin/rm -rf "$2.previous"
-          else
-            /bin/mv "$2.previous" "$2"
+        if [ -e "$2" ]; then
+          /bin/rm -rf "$2.previous"
+          if /bin/mv "$2" "$2.previous"; then
+            if /bin/mv "$3" "$2"; then
+              /bin/rm -rf "$2.previous"
+            else
+              /bin/mv "$2.previous" "$2"
+            fi
           fi
+        else
+          /bin/mv "$3" "$2"
         fi
         /usr/bin/xattr -dr com.apple.quarantine "$2" 2>/dev/null
         /bin/rm -rf "$4"

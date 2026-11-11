@@ -25,19 +25,31 @@ public enum UpdatePolicy {
         info.build > currentBuild
     }
 
-    /// Why the running app can't replace itself, or nil if it can.
-    public static func installProblem(appPath: String, parentIsWritable: Bool) -> String? {
+    public enum InstallPlan: Equatable, Sendable {
+        /// Replace the running app bundle in place.
+        case replace(String)
+        /// The running copy is a read-only shadow (opened from Downloads): install into Applications instead.
+        case installInto(String)
+        case impossible(String)
+    }
+
+    public static let applicationsPath = "/Applications/KnockSense.app"
+
+    /// Where an update should go.
+    public static func installPlan(appPath: String, parentIsWritable: Bool, applicationsIsWritable: Bool) -> InstallPlan {
         if !appPath.hasSuffix(".app") && !appPath.hasSuffix(".app/") {
-            return "KnockSense isn't running from an app bundle, so it can't update itself."
+            return .impossible("KnockSense isn't running from an app bundle, so it can't update itself.")
         }
         // macOS runs apps opened straight from Downloads (or a zip) from a read-only shadow copy.
         if appPath.contains("/AppTranslocation/") {
-            return "Move KnockSense.app into your Applications folder, open it from there, then try again."
+            return applicationsIsWritable
+                ? .installInto(applicationsPath)
+                : .impossible("Move KnockSense.app into your Applications folder, open it from there, then try again.")
         }
         if !parentIsWritable {
-            return "KnockSense doesn't have permission to replace itself in this folder."
+            return .impossible("KnockSense doesn't have permission to replace itself in this folder.")
         }
-        return nil
+        return .replace(appPath)
     }
 
     /// Accepts only well-formed checksums and HTTPS download links.

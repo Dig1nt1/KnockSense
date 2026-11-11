@@ -310,12 +310,16 @@ final class UpdateTests: XCTestCase {
         XCTAssertFalse(UpdatePolicy.isValid(http))
     }
 
-    func testInstallProblems() {
-        XCTAssertNil(UpdatePolicy.installProblem(appPath: "/Applications/KnockSense.app", parentIsWritable: true))
-        XCTAssertNotNil(UpdatePolicy.installProblem(appPath: "/Applications/KnockSense.app", parentIsWritable: false))
-        XCTAssertNotNil(UpdatePolicy.installProblem(
-            appPath: "/private/var/folders/xy/T/AppTranslocation/1234/d/KnockSense.app", parentIsWritable: true))
-        XCTAssertNotNil(UpdatePolicy.installProblem(appPath: "/usr/local/bin/KnockSense", parentIsWritable: true))
+    func testInstallPlan() {
+        XCTAssertEqual(UpdatePolicy.installPlan(appPath: "/Applications/KnockSense.app", parentIsWritable: true, applicationsIsWritable: true),
+                       .replace("/Applications/KnockSense.app"))
+        // Opened from Downloads: macOS runs a read-only shadow copy, so install into Applications instead.
+        let shadow = "/private/var/folders/xy/T/AppTranslocation/1234/d/KnockSense.app"
+        XCTAssertEqual(UpdatePolicy.installPlan(appPath: shadow, parentIsWritable: false, applicationsIsWritable: true),
+                       .installInto("/Applications/KnockSense.app"))
+        if case .impossible = UpdatePolicy.installPlan(appPath: shadow, parentIsWritable: false, applicationsIsWritable: false) {} else { XCTFail() }
+        if case .impossible = UpdatePolicy.installPlan(appPath: "/Applications/KnockSense.app", parentIsWritable: false, applicationsIsWritable: true) {} else { XCTFail() }
+        if case .impossible = UpdatePolicy.installPlan(appPath: "/usr/local/bin/KnockSense", parentIsWritable: true, applicationsIsWritable: true) {} else { XCTFail() }
     }
 }
 
