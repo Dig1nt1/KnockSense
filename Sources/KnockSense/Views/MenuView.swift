@@ -94,6 +94,10 @@ struct StatusLine: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(text).font(.caption)
             Spacer()
+            if state.config.detectionSource == .microphone && state.micProblem != nil {
+                Button("Fix") { state.fixMicrophoneAccess() }
+                    .font(.caption)
+            }
             if state.config.detectionSource == .microphone && state.micStatus == .denied {
                 Button("Open Settings") { Permissions.openMicrophoneSettings() }
                     .font(.caption)
@@ -111,7 +115,7 @@ struct StatusLine: View {
             default: return .red
             }
         }
-        if state.micStatus == .denied || state.engineError != nil { return .red }
+        if state.micStatus == .denied || state.engineError != nil || state.micProblem != nil { return .red }
         if state.training != nil { return .orange }
         return state.listening ? .green : .yellow
     }
@@ -129,6 +133,7 @@ struct StatusLine: View {
             }
         }
         if state.micStatus == .denied { return "Microphone access denied" }
+        if state.micProblem != nil { return "Microphone isn't sending sound" }
         if let error = state.engineError { return error }
         if let session = state.training {
             let target = session.zoneID == nil ? "your knock" : "“\(state.zoneName(session.zoneID) ?? "area")”"

@@ -79,6 +79,8 @@ final class AppState: ObservableObject {
     @Published private(set) var motionState: MotionSensor.State = .stopped
     @Published private(set) var helperInstalled = MotionHelperInstaller.isInstalled
     @Published private(set) var helperMessage: String?
+    /// Set when the microphone is "on" but delivering nothing (usually a stale macOS permission).
+    @Published private(set) var micProblem: String?
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
@@ -88,6 +90,9 @@ final class AppState: ObservableObject {
     private var flashTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var suppressUntil: TimeInterval = 0
+    private var watchdogTask: Task<Void, Never>?
+    private var recoveryAttempts = 0
+    private var lastRecovery: TimeInterval = 0
     /// Knocks of the pattern currently being collected (parallel to the grouper).
     private var pendingKnocks: [SoundSample] = []
     /// The sounds behind the most recent action, for "That wasn't me".
@@ -142,7 +147,19 @@ final class AppState: ObservableObject {
 
         updater.startAutomaticChecks { [weak self] in self?.config.autoCheckUpdates ?? false }
 
-        if initial.enabled { startListening() }
+        // Give the audio system a moment after launch (starting instantly can fail at login),
+        // then keep an eye on the microphone.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard let self, self.config.enabled else { return }
+            self.startListening()
+        }
+        watchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self?.checkMicrophoneHealth()
+            }
+        }
         if loaded == nil { store.save(initial) }
         AppState.current = self
         // Show the window whenever the user opens the app themselves, so it's obvious it started
@@ -184,6 +201,76 @@ final class AppState: ObservableObject {
         levelModel.level = 0
         grouper.reset()
         pendingKnocks = []
+    }
+
+    // MARK: - Microphone watchdog
+
+    private func checkMicrophoneHealth() {
+        guard config.enabled, config.detectionSource == .microphone, micStatus == .authorized else {
+            micProblem = nil
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastRecovery > 5 else { return }      // give each restart time to settle
+
+        if !listening {
+            // Starting failed earlier (e.g. right at launch): keep retrying quietly.
+            lastRecovery = now
+            startEngine()
+            return
+        }
+        let health = audio.health()
+        let noAudio = health.secondsSinceAudio > 3
+        let silent = health.secondsSilent > 4
+        guard noAudio || silent else {
+            if health.secondsSilent == 0 { recoveryAttempts = 0; micProblem = nil }
+            return
+        }
+        if recoveryAttempts < 2 {
+            recoveryAttempts += 1
+            lastRecovery = now
+            appendLog(noAudio ? "Microphone stopped sending sound — restarting it" : "Microphone is silent — restarting it")
+            restartMicrophone(log: false)
+        } else {
+            micProblem = "KnockSense isn't getting any sound from the microphone. macOS is probably blocking it for this version of the app."
+        }
+    }
+
+    /// Restarts audio capture with a fresh engine.
+    func restartMicrophone(log: Bool = true) {
+        do {
+            try audio.restart()
+            listening = true
+            engineError = nil
+            inputDescription = audio.inputDescription
+            if log { appendLog("Microphone restarted") }
+        } catch {
+            listening = false
+            engineError = error.localizedDescription
+        }
+    }
+
+    /// Resets KnockSense's microphone permission and asks again. Fixes a permission macOS
+    /// remembered for an older build (each update is signed differently).
+    func fixMicrophoneAccess() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.knocksense.app"
+        let reset = Process()
+        reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        reset.arguments = ["reset", "Microphone", bundleID]
+        try? reset.run()
+        reset.waitUntilExit()
+        micProblem = nil
+        recoveryAttempts = 0
+        Task { @MainActor in
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            self.micStatus = granted ? .authorized : .denied
+            if granted {
+                self.restartMicrophone(log: false)
+                self.appendLog("Microphone access renewed")
+            } else {
+                self.appendLog("Microphone access was not allowed")
+            }
+        }
     }
 
     private func motionStateChanged(_ newState: MotionSensor.State) {

@@ -44,8 +44,21 @@ if [[ -f Resources/AppIcon.png ]]; then
 fi
 
 # Ad-hoc signature (or your Developer ID: SIGN_IDENTITY="Developer ID Application: ........." ./build.sh)
-codesign --force --sign "${SIGN_IDENTITY:--}" "${APP}/Contents/Helpers/knocksense-imu"
-codesign --force --sign "${SIGN_IDENTITY:--}" "${APP}"
+if [[ -z "${SIGN_IDENTITY:-}" || "${SIGN_IDENTITY}" == "-" ]]; then
+  # Ad-hoc signing normally ties macOS permissions (microphone, accessibility) to this exact build,
+  # so every update would silently lose them. A designated requirement based on the bundle
+  # identifier keeps the app's identity stable across builds, so permissions survive updates.
+  codesign --force --sign - --identifier com.knocksense.imu \
+    -r='designated => identifier "com.knocksense.imu"' "${APP}/Contents/Helpers/knocksense-imu"
+  codesign --force --sign - -r='designated => identifier "com.knocksense.app"' "${APP}"
+else
+  codesign --force --sign "${SIGN_IDENTITY}" "${APP}/Contents/Helpers/knocksense-imu"
+  codesign --force --sign "${SIGN_IDENTITY}" "${APP}"
+fi
+codesign -d -r- "${APP}" 2>&1 | grep designated || true
+# Fail the build if either signature doesn't satisfy its own requirement.
+codesign --verify --strict --verbose=1 "${APP}/Contents/Helpers/knocksense-imu"
+codesign --verify --deep --strict --verbose=1 "${APP}"
 echo "==> Built ${APP}"
 
 case "${1:-}" in

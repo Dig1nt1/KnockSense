@@ -25,6 +25,13 @@ final class AudioPipeline: @unchecked Sendable {
     private var params: DetectorParams        // only touched on `queue` after init
     private var lastLevelTime = 0.0
     private var configObserver: NSObjectProtocol?
+    private var lastStartTime = 0.0
+
+    // Health (only touched on `queue`): when audio last arrived and how long it has been pure zeros.
+    // A real microphone always picks up a little noise; exact digital silence means macOS is
+    // feeding us nothing (e.g. microphone permission no longer matches this build).
+    private var lastBufferTime = 0.0
+    private var silentSince: Double?
 
     private(set) var isRunning = false
     private(set) var inputDescription = "—"
@@ -62,6 +69,12 @@ final class AudioPipeline: @unchecked Sendable {
             self.queue.async { self.process(copy, sampleRate: sampleRate) }
         }
 
+        let startTime = CFAbsoluteTimeGetCurrent()
+        lastStartTime = startTime
+        queue.sync {
+            self.lastBufferTime = 0
+            self.silentSince = nil
+        }
         engine.prepare()
         do {
             try engine.start()
@@ -92,6 +105,30 @@ final class AudioPipeline: @unchecked Sendable {
         queue.async { self.detector = nil }
     }
 
+    struct Health: Sendable {
+        /// Seconds since the last audio buffer arrived (infinity if none since start).
+        let secondsSinceAudio: Double
+        /// Seconds the input has been pure digital silence (0 if there is real sound/noise).
+        let secondsSilent: Double
+    }
+
+    func health() -> Health {
+        queue.sync {
+            let now = CFAbsoluteTimeGetCurrent()
+            return Health(
+                secondsSinceAudio: lastBufferTime > 0 ? now - lastBufferTime : (isRunning ? now - lastStartTime : 0),
+                secondsSilent: silentSince.map { now - $0 } ?? 0
+            )
+        }
+    }
+
+    /// Full restart with a fresh engine (clears any stale device/format state).
+    func restart() throws {
+        stop()
+        engine = AVAudioEngine()
+        try start()
+    }
+
     func updateParams(_ newParams: DetectorParams) {
         queue.async {
             self.params = newParams
@@ -101,21 +138,30 @@ final class AudioPipeline: @unchecked Sendable {
 
     /// Input device changed (headset plugged in, default mic switched…): rebuild the engine.
     private func handleConfigurationChange() {
-        stop()
-        engine = AVAudioEngine()
+        // Pointing the engine at the built-in mic during start() itself triggers this notification;
+        // restarting for that would loop forever.
+        guard CFAbsoluteTimeGetCurrent() - lastStartTime > 2 else { return }
         var message: String?
-        do { try start() } catch { message = error.localizedDescription }
+        do { try restart() } catch { message = error.localizedDescription }
         onRestart?(message)
     }
 
     private func process(_ channels: [[Float]], sampleRate: Double) {
         guard !channels.isEmpty, sampleRate > 0 else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        lastBufferTime = now
+        var loudest: Float = 0
+        for channel in channels { for v in channel { loudest = max(loudest, abs(v)) } }
+        if loudest < 1e-7 {
+            if silentSince == nil { silentSince = now }
+        } else {
+            silentSince = nil
+        }
         if detector == nil || detector?.sampleRate != sampleRate || detector?.channelCount != channels.count {
             detector = KnockDetector(sampleRate: sampleRate, channelCount: channels.count, params: params)
         }
         guard let detector else { return }
         let events = detector.process(channels)
-        let now = CFAbsoluteTimeGetCurrent()
         if now - lastLevelTime > 0.066 {
             lastLevelTime = now
             onLevel?(detector.takeLevel())

@@ -116,6 +116,20 @@ struct GeneralView: View {
             }
 
             Section("Permissions") {
+                if let problem = state.micProblem, state.config.detectionSource == .microphone {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("Fix Microphone Access") { state.fixMicrophoneAccess() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Restart Microphone") { state.restartMicrophone() }
+                        }
+                        Text("Fix resets KnockSense's microphone permission; click Allow when macOS asks.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Label("Microphone", systemImage: "mic.fill")
                     Spacer()
