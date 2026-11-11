@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — KnockSense</title>
+  <meta name="description" content="How KnockSense handles your data: sound is analysed on your Mac and never recorded or sent anywhere.">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#f5f5f7; --text:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.08); --accent:#0a84ff; --card:#fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0f; --text:#f5f5f7; --muted:#a1a1a6; --line:rgba(255,255,255,.09); --card:#15151c; } }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif; line-height:1.65; -webkit-font-smoothing:antialiased; }
+    .wrap { max-width:760px; margin:0 auto; padding:48px 24px 80px; }
+    a { color:var(--accent); }
+    .back { display:inline-flex; align-items:center; gap:10px; font-weight:600; color:var(--text); text-decoration:none; margin-bottom:40px; }
+    .back img { width:28px; height:28px; }
+    h1 { font-size:44px; letter-spacing:-.03em; margin:0 0 6px; }
+    .date { color:var(--muted); margin-bottom:36px; }
+    h2 { font-size:22px; margin:36px 0 8px; letter-spacing:-.01em; }
+    p, li { color:var(--muted); } b { color:var(--text); }
+    .summary { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:20px 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="./"><img src="assets/icon.png" alt="">KnockSense</a>
+    <h1>Privacy Policy</h1>
+    <div class="date">Last updated: November 2026</div>
+
+    <div class="summary"><b>In short:</b> KnockSense works entirely on your Mac. It has no accounts, no analytics and no tracking. Sound is analysed in real time and never recorded. Nothing leaves your Mac unless you turn on phone alerts for Laptop Guard.</div>
+
+    <h2>Microphone</h2>
+    <p>KnockSense listens to the built-in microphone to detect knocks. Audio is processed in memory, a few milliseconds at a time, and discarded immediately. It is <b>never recorded, stored or sent anywhere</b>. When you use “Teach My Knock” or train areas, KnockSense keeps a short numeric fingerprint of each knock (frequency levels, not audio) in its settings file on your Mac.</p>
+
+    <h2>Motion sensor (optional)</h2>
+    <p>If you turn on motion-sensor mode, a small helper on your Mac reads the built-in motion sensor and passes the readings to KnockSense on the same Mac. Readings are not stored or sent anywhere.</p>
+
+    <h2>Camera (Laptop Guard, optional)</h2>
+    <p>Only while Laptop Guard is armed, KnockSense uses the camera to take photos when someone moves or touches your Mac. Photos are saved in <b>Pictures › KnockSense Guard</b> on your Mac. You can delete them at any time.</p>
+
+    <h2>Phone alerts (Laptop Guard, optional)</h2>
+    <p>If you turn on phone alerts, Laptop Guard sends the alert text and the photo to <a href="https://ntfy.sh">ntfy.sh</a>, a free push-notification service, under the topic name shown in Settings. Anyone who knows that topic name can read the alerts, so keep it private; you can generate a new one at any time. ntfy's own <a href="https://ntfy.sh/docs/privacy/">privacy policy</a> applies to those messages. Nothing is sent if phone alerts are off.</p>
+
+    <h2>Updates</h2>
+    <p>When checking for updates, KnockSense downloads a small version file and, if you choose to update, the new app from GitHub. GitHub may log these requests as described in its privacy statement. KnockSense sends no information about you or your Mac.</p>
+
+    <h2>Settings</h2>
+    <p>Your rules, areas and preferences are stored only on your Mac, in <code>~/Library/Application Support/KnockSense/config.json</code>.</p>
+
+    <h2>Contact</h2>
+    <p>Questions? Open an issue on <a href="https://github.com/Dig1nt1/KnockSense/issues">GitHub</a>.</p>
+  </div>
+</body>
+</html>

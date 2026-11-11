@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KnockSense — Knock on your Mac. It does the rest.</title>
+  <meta name="description" content="KnockSense turns knocks on your MacBook into actions. Double-knock to play music, triple-knock for Mission Control, and protect your Mac with Laptop Guard. Free for macOS.">
+  <meta name="theme-color" content="#0b0b0f">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="KnockSense — Knock on your Mac. It does the rest.">
+  <meta property="og:description" content="Turn knocks on your MacBook into actions. Free for macOS.">
+  <meta property="og:image" content="https://dig1nt1.github.io/KnockSense/assets/og.png">
+  <meta property="og:url" content="https://dig1nt1.github.io/KnockSense/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f5f5f7; --bg-2: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.08);
+      --card: #ffffff; --accent: #0a84ff; --accent-2: #5e5ce6; --glow: rgba(10,132,255,.35);
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 40px rgba(0,0,0,.08);
+      --radius: 22px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0b0f; --bg-2: #111117; --text: #f5f5f7; --muted: #a1a1a6; --line: rgba(255,255,255,.09);
+        --card: #15151c; --glow: rgba(10,132,255,.45);
+        --shadow: 0 1px 2px rgba(0,0,0,.3), 0 20px 60px rgba(0,0,0,.45);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased; line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav { position: sticky; top: 0; z-index: 10; backdrop-filter: saturate(180%) blur(18px);
+          -webkit-backdrop-filter: saturate(180%) blur(18px); background: color-mix(in srgb, var(--bg) 72%, transparent);
+          border-bottom: 1px solid var(--line); }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); font-size: 17px; }
+    .brand img { width: 30px; height: 30px; }
+    .brand:hover { text-decoration: none; }
+    .navlinks { display: flex; gap: 28px; align-items: center; font-size: 14px; }
+    .navlinks a { color: var(--muted); }
+    .navlinks a:hover { color: var(--text); text-decoration: none; }
+    .navlinks a.btn-primary, .navlinks a.btn-primary:hover { color: #fff; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; border-radius: 999px; font-weight: 600;
+           padding: 14px 26px; font-size: 16px; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 24px var(--glow); }
+    .btn-primary:hover { box-shadow: 0 12px 32px var(--glow); }
+    .btn-ghost { color: var(--text); border: 1px solid var(--line); background: var(--card); }
+    .btn-small { padding: 8px 16px; font-size: 14px; }
+    @media (max-width: 760px) { .navlinks a:not(.btn) { display: none; } }
+
+    /* Hero */
+    .hero { position: relative; text-align: center; padding: 88px 0 40px; overflow: hidden; }
+    .hero::before { content: ""; position: absolute; inset: -20% -10% auto; height: 620px; z-index: -1;
+      background: radial-gradient(50% 50% at 50% 40%, var(--glow) 0%, transparent 70%); opacity: .55; }
+    .icon-stage { position: relative; width: 180px; height: 180px; margin: 0 auto 36px; }
+    .icon-stage img { position: relative; width: 180px; height: 180px; z-index: 2; animation: float 6s ease-in-out infinite;
+                      filter: drop-shadow(0 24px 40px rgba(0,0,0,.25)); }
+    .ring { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; border-radius: 50%;
+            border: 2px solid var(--accent); transform: translate(-50%,-50%) scale(.6); opacity: 0;
+            animation: ripple 3.2s ease-out infinite; z-index: 1; }
+    .ring:nth-child(2) { animation-delay: .35s; } .ring:nth-child(3) { animation-delay: 1.6s; } .ring:nth-child(4) { animation-delay: 1.95s; }
+    @keyframes ripple { 0% { transform: translate(-50%,-50%) scale(.6); opacity: .7; } 100% { transform: translate(-50%,-50%) scale(2.9); opacity: 0; } }
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    h1 { font-size: clamp(42px, 7vw, 80px); line-height: 1.04; letter-spacing: -0.035em; margin: 0 0 22px; font-weight: 800; }
+    h1 .grad { background: linear-gradient(120deg, var(--accent), var(--accent-2) 60%, #bf5af2);
+               -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { font-size: clamp(18px, 2.2vw, 22px); color: var(--muted); max-width: 680px; margin: 0 auto 34px; }
+    .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .meta { margin-top: 18px; font-size: 13px; color: var(--muted); }
+
+    /* Demo */
+    .demo { margin: 64px auto 0; max-width: 760px; }
+    .mac { position: relative; margin: 0 auto; width: min(640px, 92%); }
+    .screen { aspect-ratio: 16/10; border-radius: 18px 18px 6px 6px; background: linear-gradient(160deg, #1c1c24, #0d0d12);
+              border: 10px solid #2a2a31; position: relative; overflow: hidden; box-shadow: var(--shadow); }
+    .screen::before { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 18%; height: 14px;
+                      background: #2a2a31; border-radius: 0 0 10px 10px; }
+    .toast { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; color: #f5f5f7; width: 90%; }
+    .toast .knock { font-size: clamp(14px, 2vw, 18px); color: #a1a1a6; letter-spacing: .02em; margin-bottom: 8px; }
+    .toast .action { font-size: clamp(22px, 4vw, 38px); font-weight: 700; letter-spacing: -.02em; transition: opacity .35s ease; }
+    .base { height: 16px; margin: 0 -6%; background: linear-gradient(#d7d8dc, #b5b7bd); border-radius: 0 0 16px 16px; position: relative; }
+    @media (prefers-color-scheme: dark) { .base { background: linear-gradient(#5b5c63, #3c3d43); } }
+    .base::after { content: ""; position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 16%; height: 6px;
+                   background: rgba(0,0,0,.12); border-radius: 0 0 8px 8px; }
+    .tap { position: absolute; bottom: -2px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent);
+           transform: translate(-50%, 50%); opacity: 0; box-shadow: 0 0 0 0 var(--glow); }
+    .tap.on { animation: tap .7s ease-out; }
+    @keyframes tap { 0% { opacity: 1; box-shadow: 0 0 0 0 var(--glow); } 100% { opacity: 0; box-shadow: 0 0 0 40px transparent; } }
+
+    /* Sections */
+    section { padding: 96px 0; }
+    .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 12px; }
+    h2 { font-size: clamp(32px, 4.6vw, 52px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 18px; font-weight: 800; }
+    .sub { color: var(--muted); font-size: 19px; max-width: 640px; margin: 0 0 48px; }
+    .center { text-align: center; } .center .sub { margin-left: auto; margin-right: auto; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow); }
+    .card h3 { margin: 16px 0 8px; font-size: 19px; letter-spacing: -.01em; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+           background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-2) 18%, transparent)); color: var(--accent); }
+    .ico svg { width: 24px; height: 24px; }
+
+    /* Guard spotlight */
+    .split { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+    @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+    .ticks { list-style: none; padding: 0; margin: 0 0 32px; }
+    .ticks li { padding-left: 32px; position: relative; margin: 12px 0; color: var(--muted); font-size: 17px; }
+    .ticks li b { color: var(--text); font-weight: 600; }
+    .ticks li::before { content: ""; position: absolute; left: 0; top: 5px; width: 18px; height: 18px; border-radius: 50%;
+                        background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E") center/12px no-repeat; }
+    .phone { width: min(340px, 100%); margin: 0 auto; border-radius: 44px; padding: 14px; background: linear-gradient(160deg, #2b2b33, #121217);
+             box-shadow: var(--shadow); }
+    .phone-in { border-radius: 32px; min-height: 420px; padding: 54px 14px 20px;
+                background: radial-gradient(120% 80% at 50% 0%, #3a2d6b 0%, #14121f 60%), #14121f; color: #fff; position: relative; }
+    .clock { text-align: center; font-size: 64px; font-weight: 300; letter-spacing: -.02em; margin-bottom: 26px; }
+    .notif { background: rgba(255,255,255,.14); backdrop-filter: blur(20px); border-radius: 20px; padding: 14px; display: flex; gap: 12px; margin-bottom: 10px; }
+    .notif .app { width: 38px; height: 38px; border-radius: 10px; background: #fff url("assets/icon.png") center/cover; flex: none; }
+    .notif b { display: block; font-size: 14px; } .notif span { font-size: 13px; color: rgba(255,255,255,.8); }
+    .notif .photo { margin-top: 10px; height: 110px; border-radius: 12px; background: linear-gradient(135deg, #4b4f63, #262836); position: relative; overflow: hidden; }
+    .notif .photo::after { content: ""; position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%); width: 90px; height: 110px;
+                           border-radius: 50% 50% 40% 40%; background: rgba(0,0,0,.35); filter: blur(2px); }
+
+    /* Steps */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+    @media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
+    .step { position: relative; }
+    .step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 40px; height: 40px;
+                    border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; margin-bottom: 6px; }
+    .note { margin-top: 24px; padding: 18px 22px; border-radius: 16px; border: 1px dashed var(--line); color: var(--muted); font-size: 15px; background: var(--bg-2); }
+
+    /* Privacy band */
+    .band { background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+    /* FAQ */
+    details { border-bottom: 1px solid var(--line); padding: 20px 0; }
+    summary { cursor: pointer; font-weight: 600; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--muted); font-weight: 400; font-size: 24px; line-height: 1; }
+    details[open] summary::after { content: "–"; }
+    details p { color: var(--muted); margin: 12px 0 0; max-width: 760px; }
+    .faq { max-width: 820px; margin: 0 auto; }
+
+    /* Final CTA + footer */
+    .final { text-align: center; padding: 110px 0; position: relative; overflow: hidden; }
+    .final::before { content: ""; position: absolute; inset: auto -10% -60% -10%; height: 520px; z-index: -1;
+                     background: radial-gradient(50% 50% at 50% 50%, var(--glow), transparent 70%); opacity: .5; }
+    .final img { width: 96px; height: 96px; margin-bottom: 18px; }
+    footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    footer a { color: var(--muted); } footer a:hover { color: var(--text); }
+
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="wrap">
+      <a class="brand" href="#"><img src="assets/icon.png" alt="">KnockSense</a>
+      <div class="navlinks">
+        <a href="#features">Features</a>
+        <a href="#guard">Laptop Guard</a>
+        <a href="#install">Install</a>
+        <a href="#faq">FAQ</a>
+        <a class="btn btn-primary btn-small" href="https://github.com/Dig1nt1/KnockSense/releases/download/latest/KnockSense.zip">Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <div class="icon-stage" aria-hidden="true">
+        <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
+        <img src="assets/icon.png" alt="">
+      </div>
+      <h1>Knock on your Mac.<br><span class="grad">It does the rest.</span></h1>
+      <p class="lead">KnockSense turns knocks on your MacBook into actions. Double-knock to play music, triple-knock for Mission Control, knock on the lid to lock the screen. No keys, no clicks.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Dig1nt1/KnockSense/releases/download/latest/KnockSense.zip">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.8-3-.8C7 7.3 5.6 8.2 4.8 9.6c-1.7 2.9-.4 7.2 1.2 9.5.8 1.1 1.7 2.4 2.9 2.4 1.2-.1 1.6-.8 3-.8s1.8.8 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.6-1-2.6-3.9zM14.1 5.6c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg>
+          Download for Mac
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Dig1nt1/KnockSense">View on GitHub</a>
+      </div>
+      <p class="meta">Free · macOS 13 Ventura or later · Apple Silicon (M1 and newer)</p>
+
+      <div class="demo" aria-hidden="true">
+        <div class="mac">
+          <div class="screen">
+            <div class="toast"><div class="knock" id="demo-knock">knock knock</div><div class="action" id="demo-action">▶︎ Play / Pause</div></div>
+          </div>
+          <div class="base"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="eyebrow">Features</div>
+      <h2>Your knuckles are the new shortcut.</h2>
+      <p class="sub">Small app, surprisingly clever. KnockSense lives in your menu bar and listens for one thing: you knocking on your Mac.</p>
+      <div class="grid">
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg></div>
+          <h3>Knock patterns</h3><p>Once, twice, three or four times. Each pattern does something different.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/><circle cx="8" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg></div>
+          <h3>Knock areas</h3><p>Teach it your spots: palm rest, lid, side. Knock in different places for different actions.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div>
+          <h3>Any action</h3><p>Play/pause, volume, lock screen, screenshots to the clipboard, Mission Control, any app, website, Shortcut, AppleScript or shell command.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg></div>
+          <h3>Works during movies</h3><p>Knocks stand out even over a loud film or music, so you can pause without hunting for the keyboard.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M4 4l16 16"/></svg></div>
+          <h3>Ignores the noise</h3><p>Doors, claps and footsteps don't count. Teach it your knock, and press “That wasn't me” to make it smarter.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><rect x="9" y="11" width="6" height="5" rx="1"/><path d="M10 11V9a2 2 0 0 1 4 0v2"/></svg></div>
+          <h3>Laptop Guard</h3><p>Leaving your Mac? Arm it. If someone touches it, you get a photo, a siren and an alert on your phone.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg></div>
+          <h3>One-click updates</h3><p>Press “Check for Updates” and KnockSense downloads, verifies and installs the newest version by itself.</p></div>
+        <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
+          <h3>Motion sensor (beta)</h3><p>On supported MacBooks, feel knocks through the built-in motion sensor, with the microphone switched off.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="guard" class="band">
+    <div class="wrap split">
+      <div>
+        <div class="eyebrow">Laptop Guard</div>
+        <h2>Leave your Mac. Keep an eye on it.</h2>
+        <p class="sub">Stepping away in a café or library? Arm Laptop Guard from the menu bar and walk away.</p>
+        <ul class="ticks">
+          <li><b>Notices everything:</b> the trackpad or keyboard being touched, the charger being unplugged, the lid closing.</li>
+          <li><b>Instant photo</b> of the moment just before someone reached for your Mac.</li>
+          <li><b>Loud siren</b> at full volume through the Mac's own speakers, even if headphones were connected.</li>
+          <li><b>Alert on your iPhone</b> with the photo, through the free ntfy app.</li>
+          <li><b>Disarm with Touch ID.</b> Just unlock your Mac.</li>
+        </ul>
+      </div>
+      <div class="phone" aria-hidden="true">
+        <div class="phone-in">
+          <div class="clock">9:41</div>
+          <div class="notif"><div class="app"></div><div><b>Laptop Guard ALARM</b><span>Someone used the keyboard or trackpad. The alarm is sounding on your Mac.</span><div class="photo"></div></div></div>
+          <div class="notif"><div class="app"></div><div><b>KnockSense</b><span>Double knock → Play / Pause</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <div class="eyebrow">Get started</div>
+      <h2>Up and knocking in a minute.</h2>
+      <p class="sub">No account, no setup wizard. Just three steps.</p>
+      <div class="steps">
+        <div class="card step"><h3>Download & move</h3><p>Download KnockSense, unzip it and drag <b>KnockSense.app</b> into your Applications folder.</p></div>
+        <div class="card step"><h3>Open & allow</h3><p>Open it and click <b>Allow</b> when macOS asks for the microphone. A ✋ appears in your menu bar.</p></div>
+        <div class="card step"><h3>Knock twice</h3><p>Knock twice next to the trackpad. Your music plays. Then make it yours in Settings.</p></div>
+      </div>
+      <div class="note"><b>The first time you open it,</b> macOS may say it can't verify the developer, because KnockSense isn't distributed through the App Store. Right-click the app → <b>Open</b> → <b>Open</b>. If there's no Open button, go to <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>. You only need to do this once.</div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap center">
+      <div class="eyebrow">Privacy</div>
+      <h2>It listens for knocks. Nothing else.</h2>
+      <p class="sub">Sound is analysed on your Mac, in real time, and thrown away. Nothing is recorded, saved or sent anywhere. Laptop Guard photos stay in your Pictures folder; phone alerts are optional and only go to the topic you choose. <a href="privacy.html">Read the privacy policy</a>.</p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <div class="center"><div class="eyebrow">FAQ</div><h2>Questions? Answers.</h2></div>
+      <div class="faq">
+        <details><summary>Which Macs does it work on?</summary><p>Any Mac with Apple Silicon (M1 or newer) running macOS 13 Ventura or later. MacBooks work best, because knocks travel straight through the case to the built-in microphones.</p></details>
+        <details><summary>Is it free?</summary><p>Yes. KnockSense is free to download and use.</p></details>
+        <details><summary>Will doors, claps or music set it off?</summary><p>KnockSense looks for the short, sharp sound of a knuckle on the case and ignores sounds that keep going, like speech and music. Two different sounds in a row, like a door's click and slam, don't count as a pattern. For even fewer false alarms, use “Teach My Knock” and the “That wasn't me” button.</p></details>
+        <details><summary>Does it drain my battery?</summary><p>Barely. The knock detector is lightweight and runs on a tiny slice of one CPU core.</p></details>
+        <details><summary>Why does macOS show the orange microphone dot?</summary><p>macOS always shows it while any app listens to the microphone. KnockSense only analyses sound for knocks and never records it. Pause it from the menu bar at any time.</p></details>
+        <details><summary>Can I still use “Hey Siri”?</summary><p>macOS turns off the “Hey Siri” wake word while any app is listening to the microphone, the same as during a Zoom call. Pause KnockSense to use it, or start Siri with its keyboard shortcut.</p></details>
+        <details><summary>Why does macOS say it can't verify the app?</summary><p>Apps from outside the App Store show this warning unless the developer pays for Apple notarization. KnockSense is safe to open; see the steps above.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <img src="assets/icon.png" alt="">
+      <h2>Give your Mac a knock.</h2>
+      <p class="sub" style="margin-left:auto;margin-right:auto">Free for macOS. Takes a minute to set up.</p>
+      <a class="btn btn-primary" href="https://github.com/Dig1nt1/KnockSense/releases/download/latest/KnockSense.zip">Download KnockSense</a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div>© 2026 KnockSense. Made for Mac.</div>
+      <div style="display:flex;gap:22px"><a href="privacy.html">Privacy</a><a href="https://github.com/Dig1nt1/KnockSense">GitHub</a><a href="https://github.com/Dig1nt1/KnockSense/releases/latest">Release notes</a></div>
+    </div>
+  </footer>
+
+  <script>
+    // Hero demo: cycle through knock → action examples with a tap animation on the palm rest.
+    const examples = [
+      ["knock knock", "▶︎ Play / Pause", [68, 72]],
+      ["knock knock knock", "Mission Control", [30, 34, 38]],
+      ["knock on the lid", "🔒 Lock Screen", [50]],
+      ["knock knock", "📸 Screenshot to clipboard", [64, 68]],
+    ];
+    const knockEl = document.getElementById("demo-knock");
+    const actionEl = document.getElementById("demo-action");
+    const base = document.querySelector(".base");
+    let i = 0;
+    function play() {
+      const [knock, action, spots] = examples[i % examples.length];
+      actionEl.style.opacity = 0;
+      spots.forEach((left, n) => setTimeout(() => {
+        const dot = document.createElement("span");
+        dot.className = "tap on"; dot.style.left = left + "%";
+        base.appendChild(dot); setTimeout(() => dot.remove(), 800);
+      }, n * 220));
+      setTimeout(() => { knockEl.textContent = knock; actionEl.textContent = action; actionEl.style.opacity = 1; }, spots.length * 220 + 150);
+      i++;
+    }
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) { play(); setInterval(play, 3200); }
+  </script>
+</body>
+</html>
