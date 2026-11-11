@@ -17,10 +17,10 @@ final class GuardCamera: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sen
 
     /// One JPEG photo, or nil if the camera isn't available or allowed.
     func snap() async -> Data? {
-        guard Self.authorized, let device = AVCaptureDevice.default(for: .video) else { return nil }
+        guard Self.authorized else { return nil }
         return await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
             queue.async {
-                guard self.pending == nil else {
+                guard self.pending == nil, let device = AVCaptureDevice.default(for: .video) else {
                     continuation.resume(returning: nil)
                     return
                 }
