@@ -41,6 +41,8 @@ final class LaptopGuard: ObservableObject {
     private var armedAt = Date()
     private var armedOnAC = false
     private var lidClosedWhileArmed = false
+    /// Photo grabbed the instant the lid started closing (sent once the Mac wakes up).
+    private var lidPhoto: Data?
     private var savedVolume: GuardSystem.VolumeState?
     private var savedOutputDevice: AudioDeviceID?
     private var phoneAlerted = false
@@ -92,6 +94,7 @@ final class LaptopGuard: ObservableObject {
         observers = []
         restoreAudio()
         lidClosedWhileArmed = false
+        lidPhoto = nil
         phase = .off
         log("Laptop Guard off (\(how))")
         GuardOverlay.shared.hide()
@@ -131,6 +134,7 @@ final class LaptopGuard: ObservableObject {
         phoneAlerted = false
         sleepBlocker.start()
         if s.watchMotion { setMotionWatch(true) }
+        if s.takePhotos && s.keepCameraReady { camera.start() }
 
         // Unlocking the Mac proves it's the owner.
         let distributed = DistributedNotificationCenter.default()
@@ -156,7 +160,7 @@ final class LaptopGuard: ObservableObject {
 
         monitorTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: 100_000_000)
                 self?.checkTriggers()
             }
         }
@@ -189,6 +193,14 @@ final class LaptopGuard: ObservableObject {
         guard s.watchLid else { return }
         lidClosedWhileArmed = true
         siren.stop()
+        if s.takePhotos {
+            // Grab the frame from just before the lid went down, before the Mac falls asleep.
+            Task { @MainActor [weak self] in
+                guard let self, let data = await self.camera.photo(secondsAgo: 0.3) else { return }
+                self.lidPhoto = data
+                if let url = GuardCamera.save(data, label: "lid closing") { self.lastPhoto = url }
+            }
+        }
         if s.phoneAlerts {
             let topic = s.ntfyTopic
             Task { _ = await PhoneAlert.send(topic: topic, title: "Laptop Guard: lid closed",
@@ -198,11 +210,13 @@ final class LaptopGuard: ObservableObject {
 
     private func macDidWake() {
         guard isActive else { return }
+        let s = settings()
+        if s.takePhotos && s.keepCameraReady { camera.start() }   // sleep stops the camera
         if case .alarm = phase {
             siren.start()          // keep screaming after a lid close / reopen
             return
         }
-        if lidClosedWhileArmed && settings().watchLid {
+        if lidClosedWhileArmed && s.watchLid {
             lidClosedWhileArmed = false
             trigger("The lid was closed and opened again")
         }
@@ -213,7 +227,19 @@ final class LaptopGuard: ObservableObject {
         let s = settings()
         log("Laptop Guard triggered: \(reason)")
         if s.takePhotos {
-            firstPhoto = Task { @MainActor [weak self] in await self?.takePhoto() }
+            let lid = lidPhoto
+            lidPhoto = nil
+            // Instant shot from just before the trigger (warm camera), then one more a moment later
+            // when the person is likely looking at the screen.
+            firstPhoto = Task { @MainActor [weak self] in
+                if let lid { return lid }
+                return await self?.takePhoto(secondsAgo: 0.4)
+            }
+            alarmTasks.append(Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                guard let self, self.isAlarming else { return }
+                _ = await self.takePhoto()
+            })
         }
         GuardOverlay.shared.show(guardian: self)
         let grace = max(0, Int(s.graceSeconds.rounded()))
@@ -279,8 +305,8 @@ final class LaptopGuard: ObservableObject {
     }
 
     @discardableResult
-    private func takePhoto() async -> Data? {
-        guard let data = await camera.snap() else { return nil }
+    private func takePhoto(secondsAgo: Double = 0) async -> Data? {
+        guard let data = await camera.photo(secondsAgo: secondsAgo) else { return nil }
         if let url = GuardCamera.save(data) {
             lastPhoto = url
             log("Guard photo saved: \(url.lastPathComponent)")

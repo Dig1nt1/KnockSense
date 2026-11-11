@@ -192,6 +192,13 @@ struct GuardSettingsView: View {
                         }
                     }
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Keep the camera ready while armed", isOn: s.keepCameraReady)
+                        .disabled(!state.config.guardSettings.takePhotos)
+                    Text("Photos are instant and show the moment just before something happened. The green camera light stays on while the guard is armed.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Toggle("Sound a loud alarm", isOn: s.soundAlarm)
                 Toggle("Full volume through the Mac's speakers", isOn: s.maxVolume)
                     .disabled(!state.config.guardSettings.soundAlarm)

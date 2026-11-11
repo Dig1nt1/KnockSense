@@ -15,6 +15,8 @@ public struct GuardSettings: Codable, Equatable, Sendable {
 
     // Responses
     public var takePhotos = true
+    /// Keep the camera running while armed so photos are instant (the green camera light stays on).
+    public var keepCameraReady = true
     public var soundAlarm = true
     public var maxVolume = true
 
@@ -33,7 +35,7 @@ public struct GuardSettings: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case lockScreen, graceSeconds, watchMotion, watchInput, watchPower, watchLid
-        case takePhotos, soundAlarm, maxVolume, phoneAlerts, ntfyTopic
+        case takePhotos, keepCameraReady, soundAlarm, maxVolume, phoneAlerts, ntfyTopic
     }
 
     public init(from decoder: Decoder) throws {
@@ -46,6 +48,7 @@ public struct GuardSettings: Codable, Equatable, Sendable {
         watchPower = try c.decodeIfPresent(Bool.self, forKey: .watchPower) ?? d.watchPower
         watchLid = try c.decodeIfPresent(Bool.self, forKey: .watchLid) ?? d.watchLid
         takePhotos = try c.decodeIfPresent(Bool.self, forKey: .takePhotos) ?? d.takePhotos
+        keepCameraReady = try c.decodeIfPresent(Bool.self, forKey: .keepCameraReady) ?? d.keepCameraReady
         soundAlarm = try c.decodeIfPresent(Bool.self, forKey: .soundAlarm) ?? d.soundAlarm
         maxVolume = try c.decodeIfPresent(Bool.self, forKey: .maxVolume) ?? d.maxVolume
         phoneAlerts = try c.decodeIfPresent(Bool.self, forKey: .phoneAlerts) ?? d.phoneAlerts
