@@ -62,13 +62,14 @@ public enum BuiltinAction: String, Codable, CaseIterable, Identifiable, Sendable
 }
 
 public enum ActionKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case builtin, openApp, openURL, shell, appleScript, shortcut
+    case builtin, keystroke, openApp, openURL, shell, appleScript, shortcut
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .builtin: return "Built-in action"
+        case .keystroke: return "Press a keyboard shortcut"
         case .openApp: return "Open an app"
         case .openURL: return "Open a website or file"
         case .shell: return "Run a shell command"
@@ -80,6 +81,7 @@ public enum ActionKind: String, Codable, CaseIterable, Identifiable, Sendable {
     public var placeholder: String {
         switch self {
         case .builtin: return ""
+        case .keystroke: return "cmd+t"
         case .openApp: return "/Applications/Safari.app or just Safari"
         case .openURL: return "https://example.com or ~/Documents/notes.txt"
         case .shell: return "say \"Hello\""
@@ -106,6 +108,7 @@ public struct KnockAction: Codable, Hashable, Sendable {
     public var isConfigured: Bool {
         switch kind {
         case .builtin: return BuiltinAction(rawValue: argument) != nil
+        case .keystroke: return KeyShortcut.parse(argument) != nil
         default: return !argument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -114,6 +117,7 @@ public struct KnockAction: Codable, Hashable, Sendable {
         let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
         switch kind {
         case .builtin: return BuiltinAction(rawValue: arg)?.title ?? "Unknown action"
+        case .keystroke: return "Press " + (KeyShortcut.parse(arg)?.display ?? arg)
         case .openApp: return "Open " + URL(fileURLWithPath: arg).deletingPathExtension().lastPathComponent
         case .openURL: return "Open " + arg
         case .shell: return "Run: " + (arg.count > 40 ? String(arg.prefix(40)) + "…" : arg)
@@ -132,15 +136,21 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// `nil` means "anywhere".
     public var zoneID: UUID?
     public var action: KnockAction
+    /// Only when this app is in front (bundle identifier, e.g. "com.spotify.client"); `nil` means any app.
+    public var appBundleID: String?
+    /// Display name of `appBundleID`, for the UI.
+    public var appName: String?
 
     public init(id: UUID = UUID(), name: String, enabled: Bool = true, knockCount: Int,
-                zoneID: UUID? = nil, action: KnockAction) {
+                zoneID: UUID? = nil, action: KnockAction, appBundleID: String? = nil, appName: String? = nil) {
         self.id = id
         self.name = name
         self.enabled = enabled
         self.knockCount = knockCount
         self.zoneID = zoneID
         self.action = action
+        self.appBundleID = appBundleID
+        self.appName = appName
     }
 }
 

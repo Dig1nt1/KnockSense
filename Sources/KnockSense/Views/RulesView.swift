@@ -11,11 +11,20 @@ struct RulesView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Knock actions").font(.title2.bold())
-                    Text("Choose what happens when you knock on your Mac. A rule for a specific area beats an “anywhere” rule.")
+                    Text("Choose what happens when you knock on your Mac. Actions for the app in front win over “any app” actions, and actions for a specific area win over “anywhere”.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                Menu {
+                    ForEach(AppActionExample.all) { example in
+                        Button(example.title) { editing = example.rule }
+                    }
+                } label: {
+                    Label("Per-App Examples", systemImage: "app.badge")
+                }
+                .fixedSize()
+                .help("Start from a ready-made action for Spotify, Zoom, Safari and more")
                 Button {
                     editing = Rule(name: "", knockCount: 2, action: .builtin(.playPause))
                 } label: {
@@ -60,7 +69,7 @@ struct RuleRow: View {
             KnockBadge(count: rule.knockCount)
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.name).font(.body.weight(.medium))
-                Text("\(rule.knockCount) knock\(rule.knockCount == 1 ? "" : "s") · \(state.zoneName(rule.zoneID) ?? "anywhere") → \(rule.action.summary)")
+                Text("\(rule.knockCount) knock\(rule.knockCount == 1 ? "" : "s") · \(state.zoneName(rule.zoneID) ?? "anywhere")\(rule.appBundleID != nil ? " · in \(rule.appName ?? rule.appBundleID!)" : "") → \(rule.action.summary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -133,6 +142,8 @@ struct RuleEditor: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                AppPicker(bundleID: $draft.appBundleID, appName: $draft.appName)
+
                 Picker("Do", selection: $draft.action.kind) {
                     ForEach(ActionKind.allCases) { kind in Text(kind.title).tag(kind) }
                 }
@@ -175,6 +186,15 @@ struct RuleEditor: View {
         case .builtin:
             Picker("Action", selection: $draft.action.argument) {
                 ForEach(BuiltinAction.allCases) { action in Text(action.title).tag(action.rawValue) }
+            }
+        case .keystroke:
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent("Shortcut") {
+                    ShortcutRecorder(value: $draft.action.argument)
+                }
+                Text("Click, then press the keys, e.g. ⌘T for a new tab or ⇧⌘A to mute in Zoom. Needs Accessibility permission.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         case .openApp:
             HStack {

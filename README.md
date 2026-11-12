@@ -66,6 +66,11 @@ On first launch macOS asks for **microphone** access. Click Allow.
        Mission Control, test notification
      - Open any app, website or file
      - Run a shell command, an AppleScript or a Shortcut from the Shortcuts app
+     - Press a keyboard shortcut (record it with one click)
+   - **Per-app actions:** set an action's **In app** to Spotify, Zoom, Safari or any other app and it
+     only runs while that app is in front, winning over "any app" actions. Double knock can skip the
+     song in Spotify, mute you in Zoom (⇧⌘A) and open a new tab in Safari (⌘T). **Per-App Examples**
+     adds these with one click.
    - **Areas:** teach KnockSense the spots you knock on (left palm rest, right palm rest, lid…) so
      each spot can do something different. Add an area, click **Train**, then knock 6 times on that
      spot. Turn on **Test mode** to check which area it detects. The **self-test accuracy** score

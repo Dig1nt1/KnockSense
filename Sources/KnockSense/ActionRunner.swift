@@ -10,6 +10,9 @@ enum ActionRunner {
         case .builtin:
             if let builtin = BuiltinAction(rawValue: arg) { run(builtin) }
 
+        case .keystroke:
+            if let shortcut = KeyShortcut.parse(arg) { press(shortcut) }
+
         case .openApp:
             if arg.contains("/") {
                 let url = URL(fileURLWithPath: (arg as NSString).expandingTildeInPath)
@@ -93,6 +96,26 @@ enum ActionRunner {
             NSLog("KnockSense: failed to launch \(path): \(error)")
             return false
         }
+    }
+
+    /// Presses a keyboard shortcut in the app that's in front (e.g. ⌘T in Safari). Needs Accessibility.
+    static func press(_ shortcut: KeyShortcut) {
+        guard AXIsProcessTrusted() else {
+            Permissions.requestAccessibility()
+            return
+        }
+        var flags = CGEventFlags()
+        if shortcut.modifiers.contains(.command) { flags.insert(.maskCommand) }
+        if shortcut.modifiers.contains(.shift) { flags.insert(.maskShift) }
+        if shortcut.modifiers.contains(.option) { flags.insert(.maskAlternate) }
+        if shortcut.modifiers.contains(.control) { flags.insert(.maskControl) }
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(shortcut.keyCode), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(shortcut.keyCode), keyDown: false) else { return }
+        down.flags = flags
+        up.flags = flags
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
     }
 
     /// Simulates a hardware media key (play/pause, next…). Requires Accessibility permission.

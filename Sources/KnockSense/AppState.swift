@@ -446,8 +446,11 @@ final class AppState: ObservableObject {
         }
 
         let zoneName = pattern.zoneID.flatMap { id in config.zones.first { $0.id == id }?.name }
-        let description = "\(pattern.count) knock\(pattern.count == 1 ? "" : "s")" + (zoneName.map { " on \($0)" } ?? "")
-        let rules = RuleMatcher.match(pattern, rules: config.rules)
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let rules = RuleMatcher.match(pattern, rules: config.rules, frontmostApp: frontmost?.bundleIdentifier)
+        let appName = rules.first?.appBundleID != nil ? (frontmost?.localizedName ?? rules.first?.appName) : nil
+        let description = "\(pattern.count) knock\(pattern.count == 1 ? "" : "s")"
+            + (zoneName.map { " on \($0)" } ?? "") + (appName.map { " in \($0)" } ?? "")
         guard !rules.isEmpty else {
             appendLog("\(description) — no action set")
             return

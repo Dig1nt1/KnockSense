@@ -122,11 +122,23 @@ public final class PatternGrouper {
 // MARK: - Rule matching
 
 public enum RuleMatcher {
-    /// Rules for a specific zone win over "anywhere" rules with the same knock count.
-    public static func match(_ pattern: KnockPattern, rules: [Rule]) -> [Rule] {
-        let candidates = rules.filter { $0.enabled && $0.knockCount == pattern.count }
-        let specific = candidates.filter { $0.zoneID != nil && $0.zoneID == pattern.zoneID }
-        return specific.isEmpty ? candidates.filter { $0.zoneID == nil } : specific
+    /// Picks the most specific matching rules. A rule for the app in front beats an "any app" rule,
+    /// and a rule for the knocked area beats an "anywhere" rule (app first, then area).
+    public static func match(_ pattern: KnockPattern, rules: [Rule], frontmostApp: String? = nil) -> [Rule] {
+        var best: [Rule] = []
+        var bestScore = -1
+        for rule in rules where rule.enabled && rule.knockCount == pattern.count {
+            if let zone = rule.zoneID, zone != pattern.zoneID { continue }
+            if let app = rule.appBundleID, app.caseInsensitiveCompare(frontmostApp ?? "") != .orderedSame { continue }
+            let score = (rule.appBundleID != nil ? 2 : 0) + (rule.zoneID != nil ? 1 : 0)
+            if score > bestScore {
+                best = [rule]
+                bestScore = score
+            } else if score == bestScore {
+                best.append(rule)
+            }
+        }
+        return best
     }
 
     public static func maxKnockCount(in rules: [Rule]) -> Int {

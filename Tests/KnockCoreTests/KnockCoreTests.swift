@@ -610,3 +610,59 @@ final class MovementDetectorTests: XCTestCase {
     }
 }
 
+final class PerAppTests: XCTestCase {
+    private let spotify = "com.spotify.client", zoom = "us.zoom.xos", safari = "com.apple.Safari"
+
+    func testAppRuleBeatsAnyAppRule() {
+        let any = Rule(name: "play/pause", knockCount: 2, action: .builtin(.playPause))
+        let skip = Rule(name: "skip", knockCount: 2, action: .builtin(.nextTrack), appBundleID: spotify, appName: "Spotify")
+        let mute = Rule(name: "mute", knockCount: 2, action: KnockAction(kind: .keystroke, argument: "cmd+shift+a"), appBundleID: zoom)
+        let rules = [any, skip, mute]
+        let double = KnockPattern(count: 2, zoneID: nil)
+        XCTAssertEqual(RuleMatcher.match(double, rules: rules, frontmostApp: spotify), [skip])
+        XCTAssertEqual(RuleMatcher.match(double, rules: rules, frontmostApp: zoom), [mute])
+        XCTAssertEqual(RuleMatcher.match(double, rules: rules, frontmostApp: safari), [any])
+        XCTAssertEqual(RuleMatcher.match(double, rules: rules, frontmostApp: nil), [any])
+        XCTAssertEqual(RuleMatcher.match(double, rules: rules, frontmostApp: "COM.SPOTIFY.CLIENT"), [skip])
+    }
+
+    func testAppOutranksAreaAndAreaOutranksAnywhere() {
+        let lid = UUID()
+        let anyApp = Rule(name: "lock", knockCount: 2, zoneID: lid, action: .builtin(.lockScreen))
+        let inSafari = Rule(name: "tab", knockCount: 2, action: KnockAction(kind: .keystroke, argument: "cmd+t"), appBundleID: safari)
+        let both = Rule(name: "both", knockCount: 2, zoneID: lid, action: .builtin(.notify), appBundleID: safari)
+        let onLid = KnockPattern(count: 2, zoneID: lid)
+        XCTAssertEqual(RuleMatcher.match(onLid, rules: [anyApp, inSafari], frontmostApp: safari), [inSafari])
+        XCTAssertEqual(RuleMatcher.match(onLid, rules: [anyApp, inSafari, both], frontmostApp: safari), [both])
+        XCTAssertEqual(RuleMatcher.match(onLid, rules: [anyApp, inSafari], frontmostApp: spotify), [anyApp])
+        XCTAssertEqual(RuleMatcher.match(KnockPattern(count: 2, zoneID: nil), rules: [anyApp], frontmostApp: nil), [])
+    }
+
+    func testOldRulesWithoutAppStillDecode() throws {
+        let json = #"{"id":"5F3B1C2A-1111-4222-8333-944455556666","name":"x","enabled":true,"knockCount":2,"action":{"kind":"builtin","argument":"playPause"}}"#
+        let rule = try JSONDecoder().decode(Rule.self, from: Data(json.utf8))
+        XCTAssertNil(rule.appBundleID)
+        XCTAssertEqual(RuleMatcher.match(KnockPattern(count: 2, zoneID: nil), rules: [rule], frontmostApp: "com.spotify.client"), [rule])
+    }
+
+    func testKeyShortcutParsing() throws {
+        let zoomMute = try XCTUnwrap(KeyShortcut.parse("cmd+shift+a"))
+        XCTAssertEqual(zoomMute.keyCode, 0)
+        XCTAssertEqual(zoomMute.modifiers, [.command, .shift])
+        XCTAssertEqual(zoomMute.display, "⇧⌘A")
+        XCTAssertEqual(zoomMute.string, "shift+cmd+a")
+        XCTAssertEqual(KeyShortcut.parse("Command + T")?.keyCode, 17)
+        XCTAssertEqual(KeyShortcut.parse("⌘⇧A"), zoomMute)
+        XCTAssertEqual(KeyShortcut.parse("ctrl+opt+space")?.display, "⌃⌥Space")
+        XCTAssertEqual(KeyShortcut.parse("cmd+left")?.display, "⌘←")
+        XCTAssertEqual(KeyShortcut.parse("f5")?.keyCode, 96)
+        XCTAssertNil(KeyShortcut.parse("cmd+shift"))      // no key
+        XCTAssertNil(KeyShortcut.parse("cmd+a+b"))        // two keys
+        XCTAssertNil(KeyShortcut.parse("cmd+nope"))
+        XCTAssertEqual(KeyShortcut.from(keyCode: 17, modifiers: [.command])?.string, "cmd+t")
+        XCTAssertEqual(KnockAction(kind: .keystroke, argument: "cmd+t").summary, "Press ⌘T")
+        XCTAssertTrue(KnockAction(kind: .keystroke, argument: "cmd+t").isConfigured)
+        XCTAssertFalse(KnockAction(kind: .keystroke, argument: "").isConfigured)
+    }
+}
+
