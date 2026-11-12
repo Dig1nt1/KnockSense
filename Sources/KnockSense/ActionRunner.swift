@@ -4,11 +4,12 @@ import KnockCore
 
 /// Executes the action attached to a rule.
 enum ActionRunner {
-    static func run(_ action: KnockAction) {
+    /// `frontApp` is the bundle id of the app the knock was meant for (used to control Spotify/Music directly).
+    static func run(_ action: KnockAction, frontApp: String? = nil) {
         let arg = action.argument.trimmingCharacters(in: .whitespacesAndNewlines)
         switch action.kind {
         case .builtin:
-            if let builtin = BuiltinAction(rawValue: arg) { run(builtin) }
+            if let builtin = BuiltinAction(rawValue: arg) { run(builtin, frontApp: frontApp) }
 
         case .keystroke:
             if let shortcut = KeyShortcut.parse(arg) { press(shortcut) }
@@ -42,11 +43,11 @@ enum ActionRunner {
         }
     }
 
-    static func run(_ action: BuiltinAction) {
+    static func run(_ action: BuiltinAction, frontApp: String? = nil) {
         switch action {
-        case .playPause: postMediaKey(16)        // NX_KEYTYPE_PLAY
-        case .nextTrack: postMediaKey(17)        // NX_KEYTYPE_NEXT
-        case .previousTrack: postMediaKey(18)    // NX_KEYTYPE_PREVIOUS
+        case .playPause: media(key: 16, command: "playpause", frontApp: frontApp)            // NX_KEYTYPE_PLAY
+        case .nextTrack: media(key: 17, command: "next track", frontApp: frontApp)           // NX_KEYTYPE_NEXT
+        case .previousTrack: media(key: 18, command: "previous track", frontApp: frontApp)   // NX_KEYTYPE_PREVIOUS
         case .volumeUp:
             osascript("set volume output volume ((output volume of (get volume settings)) + 10)")
         case .volumeDown:
@@ -95,6 +96,37 @@ enum ActionRunner {
         } catch {
             NSLog("KnockSense: failed to launch \(path): \(error)")
             return false
+        }
+    }
+
+    /// Bundle ids of players that can be told what to do directly.
+    private static let players = ["com.spotify.client": "Spotify", "com.apple.Music": "Music"]
+
+    /// Play/pause/next/previous. With Spotify or Music in front, tell that app directly (a media key goes
+    /// to whichever app played audio last, which may be a browser tab). Otherwise use the media key, or,
+    /// without Accessibility permission, tell whichever of Spotify/Music is running.
+    private static func media(key: Int, command: String, frontApp: String?) {
+        if let id = frontApp, let player = players[id] {
+            osascript("tell application \"\(player)\" to \(command)")
+        } else if AXIsProcessTrusted() {
+            postMediaKey(key)
+        } else {
+            osascript("""
+            if application "Spotify" is running then
+                tell application "Spotify" to \(command)
+            else if application "Music" is running then
+                tell application "Music" to \(command)
+            end if
+            """)
+        }
+    }
+
+    /// Actions that only work with Accessibility permission.
+    static func needsAccessibility(_ action: KnockAction) -> Bool {
+        switch action.kind {
+        case .keystroke: return true
+        case .builtin: return BuiltinAction(rawValue: action.argument) == .lockScreen
+        default: return false
         }
     }
 

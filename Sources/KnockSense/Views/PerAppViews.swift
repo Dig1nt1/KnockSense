@@ -166,3 +166,32 @@ struct AppActionExample: Identifiable {
         ]
     }
 }
+
+/// Shown when actions need Accessibility permission that KnockSense doesn't have (often because an
+/// older version is still listed in Privacy & Security and macOS no longer accepts it).
+struct AccessibilityBanner: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Keyboard shortcuts and Lock Screen need Accessibility permission, and KnockSense doesn't have it right now.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Open Accessibility settings. If KnockSense is already listed (even switched on), select it, click **−** to remove it, then click **+** and add KnockSense from Applications again. macOS keeps the permission of an older version, which no longer counts.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Open Accessibility Settings") {
+                    Permissions.requestAccessibility()
+                    Permissions.openAccessibilitySettings()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Show KnockSense in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
+    }
+}
+

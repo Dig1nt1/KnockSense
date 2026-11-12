@@ -36,6 +36,16 @@ struct MenuView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
+            if state.accessibilityNeeded {
+                Button {
+                    SettingsWindowController.shared.show(state: state)
+                } label: {
+                    Label("Shortcuts need Accessibility permission — fix", systemImage: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
             if state.canMarkLastAsNotMe {
                 Button {
                     state.markLastAsNotMe()

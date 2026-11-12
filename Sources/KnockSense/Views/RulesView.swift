@@ -33,6 +33,10 @@ struct RulesView: View {
                 .buttonStyle(.borderedProminent)
             }
 
+            if state.accessibilityNeeded {
+                AccessibilityBanner()
+            }
+
             if state.config.rules.isEmpty {
                 Spacer()
                 Text("No actions yet. Click “Add Action” to create one.")
@@ -75,7 +79,8 @@ struct RuleRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            Button("Test") { ActionRunner.run(rule.action) }
+            Button("Test") { state.test(rule) }
+                .help(rule.appBundleID == nil ? "Run this action now" : "Switch to \(rule.appName ?? "the app") and run this action there")
             Button { onEdit() } label: { Image(systemName: "pencil") }
                 .help("Edit")
             Button(role: .destructive) { state.deleteRule(rule.id) } label: { Image(systemName: "trash") }
@@ -161,7 +166,7 @@ struct RuleEditor: View {
             .formStyle(.grouped)
 
             HStack {
-                Button("Test Action") { ActionRunner.run(draft.action) }
+                Button("Test Action") { state.test(draft) }
                     .disabled(!draft.action.isConfigured)
                 Spacer()
                 Button("Cancel") { dismiss() }
