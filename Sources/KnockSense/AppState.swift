@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import AVFoundation
 import Combine
 import KnockCore
@@ -36,7 +35,13 @@ struct ConfigStore {
 
     func load() -> AppConfig? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(AppConfig.self, from: data)
+        if let config = try? JSONDecoder().decode(AppConfig.self, from: data) { return config }
+        // Unreadable: keep a copy instead of letting the defaults silently overwrite it.
+        let backup = url.deletingLastPathComponent().appendingPathComponent("config-unreadable-backup.json")
+        try? FileManager.default.removeItem(at: backup)
+        try? FileManager.default.copyItem(at: url, to: backup)
+        NSLog("KnockSense: settings could not be read; saved a copy to \(backup.path)")
+        return nil
     }
 
     func save(_ config: AppConfig) {
@@ -84,11 +89,6 @@ final class AppState: ObservableObject {
     @Published private(set) var helperMessage: String?
     /// Set when the microphone is "on" but delivering nothing (usually a stale macOS permission).
     @Published private(set) var micProblem: String?
-    /// Accessibility permission (needed to press keyboard shortcuts and media keys).
-    @Published private(set) var accessibilityTrusted = AXIsProcessTrusted()
-    /// The last app other than KnockSense that was in front (KnockSense's own windows don't count).
-    private var lastOtherApp: NSRunningApplication?
-    private var appObserver: NSObjectProtocol?
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
@@ -180,20 +180,7 @@ final class AppState: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self?.checkMicrophoneHealth()
-                self?.refreshAccessibility()
             }
-        }
-
-        // Remember the last "real" app in front, so knocking while KnockSense's own window or menu was
-        // the last thing clicked still targets the app you were using.
-        let ownID = Bundle.main.bundleIdentifier
-        if let front = NSWorkspace.shared.frontmostApplication, front.bundleIdentifier != ownID { lastOtherApp = front }
-        appObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.bundleIdentifier != ownID, let state = self else { return }
-            Task { @MainActor in state.lastOtherApp = app }
         }
         if loaded == nil { store.save(initial) }
         AppState.current = self
@@ -374,9 +361,9 @@ final class AppState: ObservableObject {
             return
         }
         lastFeatureDimension = features.count
-        pulse()
 
         if var session = training {
+            pulse()
             let name: String
             if let zoneID = session.zoneID {
                 guard let index = config.zones.firstIndex(where: { $0.id == zoneID }) else {
@@ -424,6 +411,7 @@ final class AppState: ObservableObject {
             }
         }
 
+        pulse()
         let result = ZoneClassifier.classify(features, zones: config.zones)
         let zoneName = result.flatMap { r in config.zones.first { $0.id == r.zoneID }?.name }
         let strength = String(format: "%.2f", peak)
@@ -465,82 +453,19 @@ final class AppState: ObservableObject {
         }
 
         let zoneName = pattern.zoneID.flatMap { id in config.zones.first { $0.id == id }?.name }
-        let target = targetApp()
-        let targetID = target?.bundleIdentifier
-        let rules = RuleMatcher.match(pattern, rules: config.rules, frontmostApp: targetID)
-        let description = "\(pattern.count) knock\(pattern.count == 1 ? "" : "s")"
-            + (zoneName.map { " on \($0)" } ?? "") + (target?.localizedName.map { " in \($0)" } ?? "")
+        let description = "\(pattern.count) knock\(pattern.count == 1 ? "" : "s")" + (zoneName.map { " on \($0)" } ?? "")
+        let rules = RuleMatcher.match(pattern, rules: config.rules)
         guard !rules.isEmpty else {
             appendLog("\(description) — no action set")
             return
         }
         for rule in rules {
-            perform(rule, in: target)
+            ActionRunner.run(rule.action)
             appendLog("\(description) → \(rule.name)")
         }
         lastFiredKnocks = knocks
         lastFiredAt = Date()
         playFeedback()
-    }
-
-    // MARK: - Per-app targeting
-
-    /// The app a knock is meant for: the app in front, or, if KnockSense itself is in front (its
-    /// settings window or menu), the app that was in front before it.
-    func targetApp() -> NSRunningApplication? {
-        let front = NSWorkspace.shared.frontmostApplication
-        if front?.bundleIdentifier == Bundle.main.bundleIdentifier || front == nil {
-            return lastOtherApp
-        }
-        return front
-    }
-
-    /// Runs a rule's action in `app`, bringing that app to the front first if KnockSense was in front
-    /// (so keyboard shortcuts land in the right app, not in KnockSense's window).
-    private func perform(_ rule: Rule, in app: NSRunningApplication?) {
-        if ActionRunner.needsAccessibility(rule.action) && !AXIsProcessTrusted() {
-            appendLog("“\(rule.name)” needs Accessibility permission — see the warning in Settings ▸ Actions")
-            accessibilityTrusted = false
-        }
-        let frontIsSelf = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
-        let id = app?.bundleIdentifier
-        if frontIsSelf, let app, rule.action.kind == .keystroke {
-            app.activate(options: [])
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                ActionRunner.run(rule.action, frontApp: id)
-            }
-        } else {
-            ActionRunner.run(rule.action, frontApp: id)
-        }
-    }
-
-    /// "Test" button: for an app-specific action, switch to that app first and run it there.
-    func test(_ rule: Rule) {
-        guard let appID = rule.appBundleID else {
-            perform(rule, in: targetApp())
-            return
-        }
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: appID).first else {
-            appendLog("Open \(rule.appName ?? appID) first, then test “\(rule.name)”")
-            NSSound.beep()
-            return
-        }
-        app.activate(options: [])
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            ActionRunner.run(rule.action, frontApp: appID)
-        }
-    }
-
-    private func refreshAccessibility() {
-        let trusted = AXIsProcessTrusted()
-        if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
-    }
-
-    /// True when some enabled action can't work until Accessibility is allowed.
-    var accessibilityNeeded: Bool {
-        !accessibilityTrusted && config.rules.contains { $0.enabled && ActionRunner.needsAccessibility($0.action) }
     }
 
     private func playFeedback() {

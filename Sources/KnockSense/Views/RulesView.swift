@@ -11,30 +11,17 @@ struct RulesView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Knock actions").font(.title2.bold())
-                    Text("Choose what happens when you knock on your Mac. Actions for the app in front win over “any app” actions, and actions for a specific area win over “anywhere”.")
+                    Text("Choose what happens when you knock on your Mac. A rule for a specific area beats an “anywhere” rule.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Menu {
-                    ForEach(AppActionExample.all) { example in
-                        Button(example.title) { editing = example.rule }
-                    }
-                } label: {
-                    Label("Per-App Examples", systemImage: "app.badge")
-                }
-                .fixedSize()
-                .help("Start from a ready-made action for Spotify, Zoom, Safari and more")
                 Button {
                     editing = Rule(name: "", knockCount: 2, action: .builtin(.playPause))
                 } label: {
                     Label("Add Action", systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
-            }
-
-            if state.accessibilityNeeded {
-                AccessibilityBanner()
             }
 
             if state.config.rules.isEmpty {
@@ -73,14 +60,13 @@ struct RuleRow: View {
             KnockBadge(count: rule.knockCount)
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.name).font(.body.weight(.medium))
-                Text("\(rule.knockCount) knock\(rule.knockCount == 1 ? "" : "s") · \(state.zoneName(rule.zoneID) ?? "anywhere")\(rule.appBundleID != nil ? " · in \(rule.appName ?? rule.appBundleID!)" : "") → \(rule.action.summary)")
+                Text("\(rule.knockCount) knock\(rule.knockCount == 1 ? "" : "s") · \(state.zoneName(rule.zoneID) ?? "anywhere") → \(rule.action.summary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer()
-            Button("Test") { state.test(rule) }
-                .help(rule.appBundleID == nil ? "Run this action now" : "Switch to \(rule.appName ?? "the app") and run this action there")
+            Button("Test") { ActionRunner.run(rule.action) }
             Button { onEdit() } label: { Image(systemName: "pencil") }
                 .help("Edit")
             Button(role: .destructive) { state.deleteRule(rule.id) } label: { Image(systemName: "trash") }
@@ -147,8 +133,6 @@ struct RuleEditor: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                AppPicker(bundleID: $draft.appBundleID, appName: $draft.appName)
-
                 Picker("Do", selection: $draft.action.kind) {
                     ForEach(ActionKind.allCases) { kind in Text(kind.title).tag(kind) }
                 }
@@ -166,7 +150,7 @@ struct RuleEditor: View {
             .formStyle(.grouped)
 
             HStack {
-                Button("Test Action") { state.test(draft) }
+                Button("Test Action") { ActionRunner.run(draft.action) }
                     .disabled(!draft.action.isConfigured)
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -191,15 +175,6 @@ struct RuleEditor: View {
         case .builtin:
             Picker("Action", selection: $draft.action.argument) {
                 ForEach(BuiltinAction.allCases) { action in Text(action.title).tag(action.rawValue) }
-            }
-        case .keystroke:
-            VStack(alignment: .leading, spacing: 4) {
-                LabeledContent("Shortcut") {
-                    ShortcutRecorder(value: $draft.action.argument)
-                }
-                Text("Click, then press the keys, e.g. ⌘T for a new tab or ⇧⌘A to mute in Zoom. Needs Accessibility permission.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         case .openApp:
             HStack {

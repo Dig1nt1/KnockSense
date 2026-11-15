@@ -62,14 +62,13 @@ public enum BuiltinAction: String, Codable, CaseIterable, Identifiable, Sendable
 }
 
 public enum ActionKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case builtin, keystroke, openApp, openURL, shell, appleScript, shortcut
+    case builtin, openApp, openURL, shell, appleScript, shortcut
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .builtin: return "Built-in action"
-        case .keystroke: return "Press a keyboard shortcut"
         case .openApp: return "Open an app"
         case .openURL: return "Open a website or file"
         case .shell: return "Run a shell command"
@@ -81,7 +80,6 @@ public enum ActionKind: String, Codable, CaseIterable, Identifiable, Sendable {
     public var placeholder: String {
         switch self {
         case .builtin: return ""
-        case .keystroke: return "cmd+t"
         case .openApp: return "/Applications/Safari.app or just Safari"
         case .openURL: return "https://example.com or ~/Documents/notes.txt"
         case .shell: return "say \"Hello\""
@@ -108,7 +106,6 @@ public struct KnockAction: Codable, Hashable, Sendable {
     public var isConfigured: Bool {
         switch kind {
         case .builtin: return BuiltinAction(rawValue: argument) != nil
-        case .keystroke: return KeyShortcut.parse(argument) != nil
         default: return !argument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -117,7 +114,6 @@ public struct KnockAction: Codable, Hashable, Sendable {
         let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
         switch kind {
         case .builtin: return BuiltinAction(rawValue: arg)?.title ?? "Unknown action"
-        case .keystroke: return "Press " + (KeyShortcut.parse(arg)?.display ?? arg)
         case .openApp: return "Open " + URL(fileURLWithPath: arg).deletingPathExtension().lastPathComponent
         case .openURL: return "Open " + arg
         case .shell: return "Run: " + (arg.count > 40 ? String(arg.prefix(40)) + "…" : arg)
@@ -136,21 +132,15 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     /// `nil` means "anywhere".
     public var zoneID: UUID?
     public var action: KnockAction
-    /// Only when this app is in front (bundle identifier, e.g. "com.spotify.client"); `nil` means any app.
-    public var appBundleID: String?
-    /// Display name of `appBundleID`, for the UI.
-    public var appName: String?
 
     public init(id: UUID = UUID(), name: String, enabled: Bool = true, knockCount: Int,
-                zoneID: UUID? = nil, action: KnockAction, appBundleID: String? = nil, appName: String? = nil) {
+                zoneID: UUID? = nil, action: KnockAction) {
         self.id = id
         self.name = name
         self.enabled = enabled
         self.knockCount = knockCount
         self.zoneID = zoneID
         self.action = action
-        self.appBundleID = appBundleID
-        self.appName = appName
     }
 }
 
@@ -230,7 +220,29 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knockPeaks = try c.decodeIfPresent([Double].self, forKey: .knockPeaks) ?? []
         rejectedSounds = try c.decodeIfPresent([[Double]].self, forKey: .rejectedSounds) ?? []
         guardSettings = (try? c.decodeIfPresent(GuardSettings.self, forKey: .guardSettings)) ?? GuardSettings()
-        rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
+        // Lenient: a rule this version can't read (or a per-app rule from a removed feature) is skipped
+        // instead of making the whole settings file unreadable.
+        rules = ((try? c.decodeIfPresent([LenientRule].self, forKey: .rules)) ?? []).compactMap(\.rule)
         zones = try c.decodeIfPresent([Zone].self, forKey: .zones) ?? []
     }
 }
+
+/// Decodes one saved rule without ever failing the surrounding settings file.
+struct LenientRule: Decodable {
+    let rule: Rule?
+
+    private struct Probe: Decodable {
+        let appBundleID: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        // Rules tied to a specific app came from a feature that was removed; running them in every app
+        // would clash with the user's other rules, so they're dropped.
+        if let probe = try? Probe(from: decoder), probe.appBundleID != nil {
+            rule = nil
+            return
+        }
+        rule = try? Rule(from: decoder)
+    }
+}
+

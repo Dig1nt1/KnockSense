@@ -145,8 +145,11 @@ struct GeneralView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Label("Accessibility", systemImage: "accessibility")
-                        Text("Needed for media keys (play/pause, next track) and Lock screen.")
+                        Text(accessibilityGranted
+                             ? "Needed for media keys (play/pause, next track) and Lock screen."
+                             : "Needed for media keys and Lock screen. If KnockSense is already listed in Accessibility, select it, click − to remove it, then add it again with +. macOS keeps the permission of an older version, which no longer counts.")
                             .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     if accessibilityGranted {
