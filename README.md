@@ -112,6 +112,21 @@ change in a future macOS update; if it stops working, switch back to the microph
 
 Areas work in this mode too: knocks on different spots push the Mac in different directions.
 
+## Listen: "Someone's calling you" and auto-duck
+
+For when you wear headphones (Settings ▸ Listen):
+
+* **Someone's calling you:** type your name and nicknames. When someone in the room says them, a
+  banner slides in ("Someone said 'Diganta'"), a soft sound plays in your headphones, Spotify/Music
+  pause and other sound is turned down for a few seconds. Speech is recognised **offline on your
+  Mac** (Apple's on-device recognition); nothing is recorded or sent anywhere.
+* **Auto-duck:** when someone talks close to you, the volume drops while they talk and comes back
+  about a second after they stop. Steady noise (fans, hum), knocks and distant chatter are ignored.
+  If you change the volume yourself meanwhile, it's left alone. On macOS 14+, it pauses while
+  another app uses the microphone (calls), so your own voice doesn't turn the call down.
+* Both only act while headphones are in use (unless you turn that off), because through speakers
+  the Mac would hear its own audio.
+
 ## Laptop Guard
 
 Leaving your Mac in a café or library? Click the menu-bar icon → **Laptop Guard → Arm**. After a

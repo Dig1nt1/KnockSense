@@ -9,6 +9,8 @@ struct SettingsView: View {
                 .tabItem { Label("Actions", systemImage: "bolt.fill") }
             ZonesView()
                 .tabItem { Label("Areas", systemImage: "square.grid.2x2") }
+            ListenView()
+                .tabItem { Label("Listen", systemImage: "ear") }
             GuardTab()
                 .tabItem { Label("Guard", systemImage: "lock.shield") }
             GeneralView()

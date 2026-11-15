@@ -89,6 +89,15 @@ final class AppState: ObservableObject {
     @Published private(set) var helperMessage: String?
     /// Set when the microphone is "on" but delivering nothing (usually a stale macOS permission).
     @Published private(set) var micProblem: String?
+    /// Microphone capture is running (for knocks, or for the listening features in motion mode).
+    @Published private(set) var micRunning = false
+    // "Someone's calling you" / auto-duck
+    @Published private(set) var listenProblem: String?
+    @Published private(set) var someoneTalking = false
+    let ducker = VolumeDucker()
+    let nameListener = NameListener()
+    private var activeNames: [String] = []
+    private var activeLocale = ""
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
@@ -122,7 +131,25 @@ final class AppState: ObservableObject {
             let features = FeatureExtractor.extract(event)
             let peak = event.peak
             guard let state = self else { return }
-            Task { @MainActor in state.handleKnock(peak: peak, features: features) }
+            Task { @MainActor in
+                // The microphone may also be running only for the listening features.
+                guard state.config.detectionSource == .microphone else { return }
+                state.handleKnock(peak: peak, features: features)
+            }
+        }
+        audio.onSpeech = { [weak self] event in
+            guard let state = self else { return }
+            Task { @MainActor in state.speechEvent(event) }
+        }
+        let names = nameListener
+        audio.onVoiceBuffer = { buffer in names.append(buffer) }
+        nameListener.onName = { [weak self] name in
+            guard let state = self else { return }
+            Task { @MainActor in state.nameHeard(name) }
+        }
+        nameListener.onProblem = { [weak self] problem in
+            guard let state = self else { return }
+            Task { @MainActor in state.listenProblem = problem }
         }
         audio.onLevel = { [weak self] value in
             guard let state = self else { return }
@@ -193,13 +220,22 @@ final class AppState: ObservableObject {
 
     // MARK: - Listening
 
+    /// The microphone is needed for knocks (microphone mode) or for the listening features.
+    var micNeeded: Bool {
+        config.detectionSource == .microphone || config.listen.nameAlertEnabled || config.listen.autoDuckEnabled
+    }
+
     func startListening() {
         if config.detectionSource == .motion {
             engineError = nil
             inputDescription = "MacBook motion sensor"
             motion.start()
-            return
         }
+        if micNeeded { startMicrophone() }
+        refreshListenFeatures()
+    }
+
+    private func startMicrophone() {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             micStatus = .authorized
@@ -212,14 +248,16 @@ final class AppState: ObservableObject {
             }
         default:
             micStatus = .denied
-            listening = false
+            if config.detectionSource == .microphone { listening = false }
         }
     }
 
     func stopListening() {
         audio.stop()
         motion.stop()
+        micRunning = false
         listening = false
+        refreshListenFeatures()
         levelModel.level = 0
         grouper.reset()
         pendingKnocks = []
@@ -228,14 +266,14 @@ final class AppState: ObservableObject {
     // MARK: - Microphone watchdog
 
     private func checkMicrophoneHealth() {
-        guard config.enabled, config.detectionSource == .microphone, micStatus == .authorized else {
+        guard config.enabled, micNeeded, micStatus == .authorized else {
             micProblem = nil
             return
         }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastRecovery > 5 else { return }      // give each restart time to settle
 
-        if !listening {
+        if !micRunning {
             // Starting failed earlier (e.g. right at launch): keep retrying quietly.
             lastRecovery = now
             startEngine()
@@ -262,12 +300,13 @@ final class AppState: ObservableObject {
     func restartMicrophone(log: Bool = true) {
         do {
             try audio.restart()
-            listening = true
+            micRunning = true
+            if config.detectionSource == .microphone { listening = true; inputDescription = audio.inputDescription }
             engineError = nil
-            inputDescription = audio.inputDescription
             if log { appendLog("Microphone restarted") }
         } catch {
-            listening = false
+            micRunning = false
+            if config.detectionSource == .microphone { listening = false }
             engineError = error.localizedDescription
         }
     }
@@ -335,17 +374,19 @@ final class AppState: ObservableObject {
     private func startEngine() {
         do {
             try audio.start()
-            listening = true
+            micRunning = true
+            if config.detectionSource == .microphone { listening = true; inputDescription = audio.inputDescription }
             engineError = nil
-            inputDescription = audio.inputDescription
         } catch {
-            listening = false
+            micRunning = false
+            if config.detectionSource == .microphone { listening = false }
             engineError = error.localizedDescription
         }
     }
 
     private func audioRestarted(error: String?) {
-        listening = audio.isRunning
+        micRunning = audio.isRunning
+        if config.detectionSource == .microphone { listening = audio.isRunning }
         engineError = error
         inputDescription = audio.inputDescription
         appendLog(error == nil ? "Microphone changed: \(audio.inputDescription)" : "Microphone error: \(error!)")
@@ -468,6 +509,96 @@ final class AppState: ObservableObject {
         playFeedback()
     }
 
+    // MARK: - "Someone's calling you" and auto-duck
+
+    /// Turns the name listener and the talking detector on or off to match the settings.
+    func refreshListenFeatures() {
+        let settings = config.listen
+        let on = config.enabled
+        audio.setSpeechWatch(on && settings.autoDuckEnabled ? .forSensitivity(settings.duckSensitivity) : nil)
+        if !(on && settings.autoDuckEnabled), someoneTalking {
+            someoneTalking = false
+            ducker.release("voice", after: 0)
+        }
+
+        let names = settings.nameList
+        let wanted = on && settings.nameAlertEnabled && NameListener.authorized && !names.isEmpty
+        audio.setForwardsBuffers(wanted)
+        if wanted {
+            if names != activeNames || settings.localeID != activeLocale {
+                nameListener.start(names: names, localeID: settings.localeID)
+                activeNames = names
+                activeLocale = settings.localeID
+            }
+        } else {
+            if !activeNames.isEmpty { nameListener.stop() }
+            activeNames = []
+            if settings.nameAlertEnabled && names.isEmpty {
+                listenProblem = "Type your name (and nicknames) so KnockSense knows what to listen for."
+            } else if settings.nameAlertEnabled && NameListener.denied {
+                listenProblem = "Speech Recognition is turned off for KnockSense in System Settings ▸ Privacy & Security."
+            } else {
+                listenProblem = nil
+            }
+        }
+    }
+
+    /// Turning the name alert on asks for Speech Recognition permission first.
+    func setNameAlert(_ on: Bool) {
+        if on && !NameListener.authorized {
+            Task { @MainActor in
+                _ = await NameListener.requestAuthorization()
+                self.config.listen.nameAlertEnabled = true
+                self.refreshListenFeatures()
+            }
+        } else {
+            config.listen.nameAlertEnabled = on
+        }
+    }
+
+    private func listeningFeaturesShouldAct() -> Bool {
+        guard config.enabled, !guardian.isActive else { return false }
+        return !config.listen.headphonesOnly || AudioDevices.headphonesInUse()
+    }
+
+    private func speechEvent(_ event: SpeechActivityDetector.Event) {
+        switch event {
+        case .started:
+            guard config.listen.autoDuckEnabled, listeningFeaturesShouldAct() else { return }
+            if config.listen.pauseDuckingDuringCalls && AudioDevices.otherAppIsUsingMicrophone() { return }
+            someoneTalking = true
+            ducker.duck("voice", fraction: config.listen.duckLevel)
+        case .ended:
+            guard someoneTalking else { return }
+            someoneTalking = false
+            ducker.release("voice", after: 1.0)
+        }
+    }
+
+    private func nameHeard(_ name: String) {
+        guard config.listen.nameAlertEnabled, listeningFeaturesShouldAct() else { return }
+        respondToName(name)
+    }
+
+    /// Shows what happens when your name is heard (ignores the headphones setting).
+    func simulateNameAlert() {
+        respondToName(config.listen.nameList.first ?? "your name")
+    }
+
+    private func respondToName(_ name: String) {
+        let pause = config.listen.pauseMusicOnName
+        AlertBanner.shared.show(title: "Someone said “\(name)”",
+                                subtitle: pause ? "Music paused. They might be talking to you." : "They might be talking to you.")
+        NSSound(named: "Glass")?.play()
+        suppressUntil = ProcessInfo.processInfo.systemUptime + 0.5     // don't hear our own sound as a knock
+        if pause {
+            ActionRunner.pausePlayers()
+            ducker.duck("name", fraction: 0.2)
+            ducker.release("name", after: 10)
+        }
+        appendLog("Heard your name (“\(name)”)")
+    }
+
     private func playFeedback() {
         guard config.playSound else { return }
         NSSound(named: "Tink")?.play()
@@ -516,6 +647,14 @@ final class AppState: ObservableObject {
                 stopListening()
                 startListening()
             }
+        } else if config.listen != old.listen, config.enabled {
+            // Start or stop the microphone if only the listening features need it.
+            if micNeeded && !micRunning { startMicrophone() }
+            if !micNeeded && micRunning {
+                audio.stop()
+                micRunning = false
+            }
+            refreshListenFeatures()
         }
         scheduleSave()
     }

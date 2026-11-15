@@ -1,3 +1,4 @@
+import AppKit
 import AudioToolbox
 import CoreAudio
 
@@ -61,6 +62,65 @@ enum AudioDevices {
         var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
         guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &devices) == noErr else { return [] }
         return devices
+    }
+
+    /// True when sound is going to headphones (AirPods and other Bluetooth/USB audio, or the
+    /// headphone jack) rather than the Mac's own speakers, a display or AirPlay.
+    static func headphonesInUse() -> Bool {
+        guard let device = defaultOutputDevice() else { return false }
+        let transport = transportType(of: device)
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn:
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDataSource,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var source: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &source) == noErr else { return false }
+            return source == 0x6864_706E      // 'hdpn': headphone jack
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort,
+             kAudioDeviceTransportTypeAirPlay, kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate:
+            return false
+        default:
+            return true
+        }
+    }
+
+    /// True when another app (not KnockSense) is recording from a microphone, e.g. during a Zoom,
+    /// FaceTime or Teams call. Needs macOS 14; on older systems it always answers false.
+    static func otherAppIsUsingMicrophone() -> Bool {
+        guard #available(macOS 14.0, *) else { return false }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+        var processes = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &processes) == noErr else { return false }
+        let ownPID = getpid()
+        for process in processes {
+            var pidAddress = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyPID,
+                                                        mScope: kAudioObjectPropertyScopeGlobal,
+                                                        mElement: kAudioObjectPropertyElementMain)
+            var pid: pid_t = 0
+            var pidSize = UInt32(MemoryLayout<pid_t>.size)
+            guard AudioObjectGetPropertyData(process, &pidAddress, 0, nil, &pidSize, &pid) == noErr, pid != ownPID else { continue }
+            var inputAddress = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyIsRunningInput,
+                                                          mScope: kAudioObjectPropertyScopeGlobal,
+                                                          mElement: kAudioObjectPropertyElementMain)
+            var running: UInt32 = 0
+            var runningSize = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(process, &inputAddress, 0, nil, &runningSize, &running) == noErr,
+                  running != 0 else { continue }
+            // Only count real apps (calls), not background system services.
+            if NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular { return true }
+        }
+        return false
     }
 
     /// Points an input audio unit (e.g. `AVAudioEngine.inputNode.audioUnit`) at a specific device.

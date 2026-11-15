@@ -75,6 +75,18 @@ enum ActionRunner {
 
     // MARK: - Helpers
 
+    /// Pauses Spotify and Music if they're playing (doesn't start anything that's paused).
+    static func pausePlayers() {
+        osascript("""
+        if application "Spotify" is running then
+            tell application "Spotify" to if player state is playing then pause
+        end if
+        if application "Music" is running then
+            tell application "Music" to if player state is playing then pause
+        end if
+        """)
+    }
+
     /// Media key when Accessibility is allowed. Without it, macOS silently drops simulated keys, so tell
     /// Spotify or Music (whichever is running) directly instead.
     private static func media(key: Int, command: String) {

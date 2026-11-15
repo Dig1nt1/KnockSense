@@ -633,3 +633,112 @@ final class SettingsMigrationTests: XCTestCase {
     }
 }
 
+final class NameAlertTests: XCTestCase {
+    private let names = NameMatcher.parseNames("Diganta, Dig")
+
+    func testParsesNames() {
+        XCTAssertEqual(names, ["Diganta", "Dig"])
+        XCTAssertEqual(NameMatcher.parseNames(" , ;\n"), [])
+    }
+
+    func testFindsNameInSpeech() {
+        XCTAssertEqual(NameMatcher.matches(in: "Hey Diganta, can you come here?", names: names), ["Diganta"])
+        XCTAssertEqual(NameMatcher.matches(in: "DIGANTA!", names: names), ["Diganta"])
+        XCTAssertEqual(NameMatcher.matches(in: "is that Diganta's laptop", names: names), ["Diganta"])
+        XCTAssertEqual(NameMatcher.matches(in: "dig come on", names: names), ["Dig"])
+    }
+
+    func testToleratesSmallRecognitionErrorsOnLongNamesOnly() {
+        XCTAssertEqual(NameMatcher.matches(in: "hey digonta", names: names), ["Diganta"])     // 1 letter off
+        XCTAssertEqual(NameMatcher.matches(in: "hey dug", names: names), [])                  // short names: exact only
+        XCTAssertEqual(NameMatcher.matches(in: "the diagonal line", names: names), [])         // too different
+    }
+
+    func testCountsEachOccurrenceAndMultiWordNames() {
+        XCTAssertEqual(NameMatcher.matches(in: "Diganta. Diganta!", names: names).count, 2)
+        let full = NameMatcher.parseNames("Diganta Sarkar")
+        XCTAssertEqual(NameMatcher.matches(in: "is Diganta Sarkar here", names: full), ["Diganta Sarkar"])
+        XCTAssertEqual(NameMatcher.matches(in: "is Diganta here", names: full), [])
+    }
+
+    func testOldConfigWithoutListenSettings() throws {
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"sensitivity":0.5}"#.utf8))
+        XCTAssertEqual(config.listen, ListenSettings())
+        XCTAssertFalse(config.listen.nameAlertEnabled)
+        XCTAssertTrue(config.listen.headphonesOnly)
+    }
+}
+
+final class SpeechActivityTests: XCTestCase {
+    private let rate = 16_000.0
+    private var seed: UInt64 = 42
+
+    private func noise() -> Double {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Double(seed >> 11) / Double(UInt64(1) << 53) * 2 - 1
+    }
+
+    /// Background noise plus optional close speech (harmonic voice with ~4 Hz syllable rhythm),
+    /// a steady fan, or a knock.
+    private func signal(duration: Double, noiseLevel: Double = 0.002, fan: Double = 0,
+                                 speech: (start: Double, end: Double, level: Double)? = nil,
+                                 knockAt: Double? = nil) -> [Float] {
+        let n = Int(duration * rate)
+        var x = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let t = Double(i) / rate
+            var v = noise() * noiseLevel + noise() * fan
+            if let s = speech, t >= s.start, t < s.end {
+                let syllable = 0.55 + 0.45 * sin(2 * .pi * 4 * t)           // syllables
+                let f0 = 140 + 25 * sin(2 * .pi * 0.7 * t)                     // intonation
+                // Harmonics shaped by typical vowel formants (~700, 1200 and 2500 Hz).
+                var voice = 0.0
+                for h in 1...25 where Double(h) * f0 < 3800 {
+                    let f = Double(h) * f0
+                    let formants = exp(-pow((f - 700) / 300, 2)) + 0.7 * exp(-pow((f - 1200) / 300, 2))
+                        + 0.3 * exp(-pow((f - 2500) / 400, 2)) + 0.1
+                    voice += formants * sin(2 * .pi * f * t)
+                }
+                v += s.level * syllable * voice / 2.0
+            }
+            if let k = knockAt, t >= k, t < k + 0.05 {
+                let tt = t - k
+                v += 0.4 * exp(-tt / 0.006) * sin(2 * .pi * 900 * tt)
+            }
+            x[i] = Float(v)
+        }
+        return x
+    }
+
+    private func run(_ x: [Float], sensitivity: Double = 0.5) -> [(SpeechActivityDetector.Event, Double)] {
+        let detector = SpeechActivityDetector(sampleRate: rate, params: .forSensitivity(sensitivity))
+        var events: [(SpeechActivityDetector.Event, Double)] = []
+        var i = 0
+        while i < x.count {
+            let chunk = Array(x[i..<min(i + 1024, x.count)])
+            for e in detector.process(chunk) { events.append((e, Double(i + chunk.count) / rate)) }
+            i += 1024
+        }
+        return events
+    }
+
+    func testDetectsSomeoneTalkingCloseByAndRelease() {
+        let events = run(signal(duration: 8, speech: (2.0, 5.0, 0.08)))
+        XCTAssertEqual(events.map(\.0), [.started, .ended])
+        XCTAssertEqual(events[0].1, 2.45, accuracy: 0.3)      // ducks within about half a second
+        XCTAssertEqual(events[1].1, 6.2, accuracy: 0.5)       // restores about a second after they stop
+    }
+
+    func testIgnoresFanNoiseKnocksAndDistantChatter() {
+        XCTAssertTrue(run(signal(duration: 6, fan: 0.03)).isEmpty)                       // steady fan
+        XCTAssertTrue(run(signal(duration: 6, knockAt: 2.0)).isEmpty)                    // a knock
+        XCTAssertTrue(run(signal(duration: 6, speech: (1.0, 5.0, 0.008))).isEmpty)       // quiet, far-away voice
+    }
+
+    func testSensitivityLetsQuieterVoicesThrough() {
+        let quiet = signal(duration: 6, speech: (1.0, 4.0, 0.02))
+        XCTAssertTrue(run(quiet, sensitivity: 0).isEmpty)
+        XCTAssertEqual(run(quiet, sensitivity: 1).first?.0, .started)
+    }
+}
+

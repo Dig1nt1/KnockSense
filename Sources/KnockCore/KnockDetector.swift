@@ -324,6 +324,18 @@ struct Biquad {
         return Biquad(b0: alpha, b1: 0, b2: -alpha, a0: 1 + alpha, a1: -2 * cos(w0), a2: 1 - alpha)
     }
 
+    static func highPass(cutoff: Double, sampleRate: Double, q: Double = 0.7071) -> Biquad {
+        let w0 = 2 * Double.pi * cutoff / sampleRate
+        let alpha = sin(w0) / (2 * q), c = cos(w0)
+        return Biquad(b0: (1 + c) / 2, b1: -(1 + c), b2: (1 + c) / 2, a0: 1 + alpha, a1: -2 * c, a2: 1 - alpha)
+    }
+
+    static func lowPass(cutoff: Double, sampleRate: Double, q: Double = 0.7071) -> Biquad {
+        let w0 = 2 * Double.pi * cutoff / sampleRate
+        let alpha = sin(w0) / (2 * q), c = cos(w0)
+        return Biquad(b0: (1 - c) / 2, b1: 1 - c, b2: (1 - c) / 2, a0: 1 + alpha, a1: -2 * c, a2: 1 - alpha)
+    }
+
     mutating func process(_ x: Double) -> Double {
         let y = b0 * x + z1
         z1 = b1 * x - a1 * y + z2

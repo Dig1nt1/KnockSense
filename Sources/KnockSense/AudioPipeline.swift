@@ -18,6 +18,10 @@ final class AudioPipeline: @unchecked Sendable {
     var onLevel: (@Sendable (Float) -> Void)?
     /// Called (on the main queue) after the input device changed and the engine restarted; carries an error message if it failed.
     var onRestart: (@Sendable (String?) -> Void)?
+    /// Someone started/stopped talking near the Mac (auto-duck).
+    var onSpeech: (@Sendable (SpeechActivityDetector.Event) -> Void)?
+    /// Mono audio for on-device speech recognition ("Someone's calling you").
+    var onVoiceBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
     private var engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "app.knocksense.audio", qos: .userInitiated)
@@ -26,6 +30,9 @@ final class AudioPipeline: @unchecked Sendable {
     private var lastLevelTime = 0.0
     private var configObserver: NSObjectProtocol?
     private var lastStartTime = 0.0
+    private var speechParams: SpeechActivityParams?   // only touched on `queue`
+    private var speech: SpeechActivityDetector?       // only touched on `queue`
+    private var forwardsBuffers = false               // only touched on `queue`
 
     // Health (only touched on `queue`): when audio last arrived and how long it has been pure zeros.
     // A real microphone always picks up a little noise; exact digital silence means macOS is
@@ -129,6 +136,19 @@ final class AudioPipeline: @unchecked Sendable {
         try start()
     }
 
+    /// Turns the "someone is talking" detector on (with these settings) or off.
+    func setSpeechWatch(_ params: SpeechActivityParams?) {
+        queue.async {
+            self.speechParams = params
+            if let params { self.speech?.params = params } else { self.speech = nil }
+        }
+    }
+
+    /// Whether to hand audio to the speech recogniser.
+    func setForwardsBuffers(_ on: Bool) {
+        queue.async { self.forwardsBuffers = on }
+    }
+
     func updateParams(_ newParams: DetectorParams) {
         queue.async {
             self.params = newParams
@@ -167,5 +187,26 @@ final class AudioPipeline: @unchecked Sendable {
             onLevel?(detector.takeLevel())
         }
         for event in events { onKnock?(event) }
+
+        guard speechParams != nil || forwardsBuffers else { return }
+        let frames = channels[0].count
+        var mono = [Float](repeating: 0, count: frames)
+        let scale = 1 / Float(channels.count)
+        for channel in channels { for i in 0..<frames { mono[i] += channel[i] * scale } }
+
+        if let params = speechParams {
+            if speech == nil || speech?.sampleRate != sampleRate {
+                speech = SpeechActivityDetector(sampleRate: sampleRate, params: params)
+            }
+            for event in speech?.process(mono) ?? [] { onSpeech?(event) }
+        }
+        if forwardsBuffers,
+           let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
+           let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
+           let out = buffer.floatChannelData?[0] {
+            buffer.frameLength = AVAudioFrameCount(frames)
+            mono.withUnsafeBufferPointer { out.update(from: $0.baseAddress!, count: frames) }
+            onVoiceBuffer?(buffer)
+        }
     }
 }
