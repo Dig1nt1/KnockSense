@@ -13,6 +13,8 @@ struct SettingsView: View {
                 .tabItem { Label("Listen", systemImage: "ear") }
             GuardTab()
                 .tabItem { Label("Guard", systemImage: "lock.shield") }
+            PresenceView()
+                .tabItem { Label("Presence", systemImage: "dot.radiowaves.left.and.right") }
             GeneralView()
                 .tabItem { Label("General", systemImage: "gearshape") }
         }

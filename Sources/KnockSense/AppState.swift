@@ -98,6 +98,26 @@ final class AppState: ObservableObject {
     let nameListener = NameListener()
     private var activeNames: [String] = []
     private var activeLocale = ""
+    // Sonar presence
+    enum SonarTestPhase: Equatable {
+        case idle
+        case preparing
+        case sitting(secondsLeft: Int)
+        case leaving(secondsLeft: Int)
+        case away(secondsLeft: Int)
+        case finished(SonarTestResult)
+    }
+    @Published private(set) var sonarTest: SonarTestPhase = .idle
+    @Published private(set) var sonarReading: SonarAnalyzer.Reading?
+    @Published private(set) var someonePresent = true
+    let sonarEmitter = SonarEmitter()
+    private var presenceTracker: PresenceTracker?
+    private var sonarTestTask: Task<Void, Never>?
+    private var testPresentReadings: [SonarAnalyzer.Reading] = []
+    private var testAwayReadings: [SonarAnalyzer.Reading] = []
+    private var volumeBeforeTest: GuardSystem.VolumeState?
+    private var screenLocked = false
+    private var screenObservers: [NSObjectProtocol] = []
 
     private let store = ConfigStore()
     private let audio: AudioPipeline
@@ -147,6 +167,19 @@ final class AppState: ObservableObject {
             guard let state = self else { return }
             Task { @MainActor in state.nameHeard(name) }
         }
+        audio.onSonar = { [weak self] reading in
+            guard let state = self else { return }
+            Task { @MainActor in state.handleSonarReading(reading) }
+        }
+        let distributed = DistributedNotificationCenter.default()
+        screenObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            guard let state = self else { return }
+            Task { @MainActor in state.screenLocked = true }
+        })
+        screenObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            guard let state = self else { return }
+            Task { @MainActor in state.screenUnlocked() }
+        })
         nameListener.onProblem = { [weak self] problem in
             guard let state = self else { return }
             Task { @MainActor in state.listenProblem = problem }
@@ -223,6 +256,19 @@ final class AppState: ObservableObject {
     /// The microphone is needed for knocks (microphone mode) or for the listening features.
     var micNeeded: Bool {
         config.detectionSource == .microphone || config.listen.nameAlertEnabled || config.listen.autoDuckEnabled
+            || sonarNeeded
+    }
+
+    /// Sonar runs during the test, and for lock-when-away once the test has passed.
+    var sonarNeeded: Bool {
+        sonarTestRunning || (config.enabled && config.presence.lockWhenAway && config.presence.canLock)
+    }
+
+    var sonarTestRunning: Bool {
+        switch sonarTest {
+        case .idle, .finished: return false
+        default: return true
+        }
     }
 
     func startListening() {
@@ -233,6 +279,7 @@ final class AppState: ObservableObject {
         }
         if micNeeded { startMicrophone() }
         refreshListenFeatures()
+        refreshSonar()
     }
 
     private func startMicrophone() {
@@ -258,6 +305,7 @@ final class AppState: ObservableObject {
         micRunning = false
         listening = false
         refreshListenFeatures()
+        refreshSonar()
         levelModel.level = 0
         grouper.reset()
         pendingKnocks = []
@@ -509,6 +557,135 @@ final class AppState: ObservableObject {
         playFeedback()
     }
 
+    /// Starts or stops the microphone when only optional features (listening, sonar) need it.
+    private func matchMicrophoneToNeeds() {
+        if micNeeded && !micRunning { startMicrophone() }
+        if !micNeeded && micRunning {
+            audio.stop()
+            micRunning = false
+        }
+    }
+
+    // MARK: - Sonar presence
+
+    private func refreshSonar() {
+        if sonarNeeded {
+            matchMicrophoneToNeeds()
+            if !sonarEmitter.isRunning {
+                do { try sonarEmitter.start() } catch { appendLog("Sonar couldn't start: \(error.localizedDescription)") }
+            }
+            audio.setSonarWatch(SonarEmitter.frequency)
+            if config.presence.lockWhenAway, let threshold = config.presence.testResult?.threshold {
+                if presenceTracker == nil {
+                    presenceTracker = PresenceTracker(threshold: threshold, awaySeconds: config.presence.awaySeconds)
+                } else {
+                    presenceTracker?.threshold = threshold
+                    presenceTracker?.awaySeconds = config.presence.awaySeconds
+                }
+            } else {
+                presenceTracker = nil
+            }
+        } else {
+            if sonarEmitter.isRunning { sonarEmitter.stop() }
+            audio.setSonarWatch(nil)
+            presenceTracker = nil
+            sonarReading = nil
+            someonePresent = true
+        }
+    }
+
+    private func handleSonarReading(_ reading: SonarAnalyzer.Reading) {
+        sonarReading = reading
+        switch sonarTest {
+        case .sitting: testPresentReadings.append(reading)
+        case .away: testAwayReadings.append(reading)
+        default: break
+        }
+        guard !sonarTestRunning, var tracker = presenceTracker, !guardian.isActive else { return }
+        let recentInput = GuardSystem.secondsSinceAnyInput() < 5
+        let change = tracker.update(time: ProcessInfo.processInfo.systemUptime, motion: reading.motion, recentInput: recentInput)
+        presenceTracker = tracker
+        someonePresent = tracker.isPresent
+        switch change {
+        case .left:
+            guard !screenLocked else { break }
+            appendLog("Sonar: you walked away — locking your Mac")
+            GuardSystem.lockScreen()
+        case .returned:
+            appendLog("Sonar: welcome back")
+            if screenLocked && config.presence.wakeOnReturn { GuardSystem.wakeDisplay() }
+        case nil:
+            break
+        }
+    }
+
+    private func screenUnlocked() {
+        screenLocked = false
+        // Unlocking means you're here: start the "away" clock from now.
+        if let tracker = presenceTracker {
+            presenceTracker = PresenceTracker(threshold: tracker.threshold, awaySeconds: tracker.awaySeconds)
+            someonePresent = true
+        }
+    }
+
+    /// Guided test: sit for 8 s, walk away, stay away for 10 s. Chimes tell you when to leave and return.
+    func startSonarTest() {
+        guard !sonarTestRunning else { return }
+        if let volume = GuardSystem.currentVolume(), volume.muted || volume.level < 40 {
+            volumeBeforeTest = volume
+            GuardSystem.setVolume(.init(level: 50, muted: false))
+        }
+        testPresentReadings = []
+        testAwayReadings = []
+        sonarTest = .preparing
+        if !config.enabled { config.enabled = true }
+        refreshSonar()
+        sonarTestTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            func countdown(_ seconds: Int, _ phase: (Int) -> SonarTestPhase) async -> Bool {
+                for left in stride(from: seconds, to: 0, by: -1) {
+                    self.sonarTest = phase(left)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if Task.isCancelled { return false }
+                }
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)          // let the sonar settle
+            guard !Task.isCancelled else { return }
+            self.testPresentReadings = []
+            guard await countdown(8, { .sitting(secondsLeft: $0) }) else { return }
+            NSSound(named: "Tink")?.play()                                // "walk away now"
+            guard await countdown(8, { .leaving(secondsLeft: $0) }) else { return }
+            self.testAwayReadings = []
+            guard await countdown(10, { .away(secondsLeft: $0) }) else { return }
+            NSSound(named: "Glass")?.play()                               // "come back"
+            let result = SonarTestResult.evaluate(present: self.testPresentReadings, away: self.testAwayReadings)
+            self.finishSonarTest(result)
+        }
+    }
+
+    func cancelSonarTest() {
+        sonarTestTask?.cancel()
+        sonarTestTask = nil
+        sonarTest = .idle
+        restoreVolumeAfterTest()
+        refreshSonar()
+    }
+
+    private func finishSonarTest(_ result: SonarTestResult) {
+        sonarTest = .finished(result)
+        config.presence.testResult = result
+        if !result.works { config.presence.lockWhenAway = false }
+        appendLog(result.works ? "Sonar test passed (\(Int(result.separation))× difference)" : "Sonar test: didn't work on this Mac")
+        restoreVolumeAfterTest()
+        refreshSonar()
+    }
+
+    private func restoreVolumeAfterTest() {
+        if let volume = volumeBeforeTest { GuardSystem.setVolume(volume) }
+        volumeBeforeTest = nil
+    }
+
     // MARK: - "Someone's calling you" and auto-duck
 
     /// Turns the name listener and the talking detector on or off to match the settings.
@@ -647,14 +824,10 @@ final class AppState: ObservableObject {
                 stopListening()
                 startListening()
             }
-        } else if config.listen != old.listen, config.enabled {
-            // Start or stop the microphone if only the listening features need it.
-            if micNeeded && !micRunning { startMicrophone() }
-            if !micNeeded && micRunning {
-                audio.stop()
-                micRunning = false
-            }
+        } else if (config.listen != old.listen || config.presence != old.presence), config.enabled {
+            matchMicrophoneToNeeds()
             refreshListenFeatures()
+            refreshSonar()
         }
         scheduleSave()
     }

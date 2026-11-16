@@ -17,6 +17,13 @@ enum GuardSystem {
         }
     }
 
+    /// Wakes the display, as if the user touched the trackpad (for Touch ID when they come back).
+    static func wakeDisplay() {
+        var assertion: IOPMAssertionID = 0
+        IOPMAssertionDeclareUserActivity("KnockSense: you're back" as CFString, kIOPMUserActiveLocal, &assertion)
+        IOPMAssertionRelease(assertion)
+    }
+
     static func isOnACPower() -> Bool {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }

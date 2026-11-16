@@ -22,6 +22,8 @@ final class AudioPipeline: @unchecked Sendable {
     var onSpeech: (@Sendable (SpeechActivityDetector.Event) -> Void)?
     /// Mono audio for on-device speech recognition ("Someone's calling you").
     var onVoiceBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
+    /// Sonar echo readings (presence).
+    var onSonar: (@Sendable (SonarAnalyzer.Reading) -> Void)?
 
     private var engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "app.knocksense.audio", qos: .userInitiated)
@@ -33,6 +35,8 @@ final class AudioPipeline: @unchecked Sendable {
     private var speechParams: SpeechActivityParams?   // only touched on `queue`
     private var speech: SpeechActivityDetector?       // only touched on `queue`
     private var forwardsBuffers = false               // only touched on `queue`
+    private var sonarFrequency: Double?               // only touched on `queue`
+    private var sonar: SonarAnalyzer?                 // only touched on `queue`
 
     // Health (only touched on `queue`): when audio last arrived and how long it has been pure zeros.
     // A real microphone always picks up a little noise; exact digital silence means macOS is
@@ -144,6 +148,14 @@ final class AudioPipeline: @unchecked Sendable {
         }
     }
 
+    /// Turns sonar echo analysis on (for a tone at `frequency`) or off.
+    func setSonarWatch(_ frequency: Double?) {
+        queue.async {
+            self.sonarFrequency = frequency
+            if frequency == nil { self.sonar = nil }
+        }
+    }
+
     /// Whether to hand audio to the speech recogniser.
     func setForwardsBuffers(_ on: Bool) {
         queue.async { self.forwardsBuffers = on }
@@ -187,6 +199,14 @@ final class AudioPipeline: @unchecked Sendable {
             onLevel?(detector.takeLevel())
         }
         for event in events { onKnock?(event) }
+
+        // Sonar uses one microphone only: mixing mics a centimetre apart would cancel a 19.5 kHz tone.
+        if let frequency = sonarFrequency, sampleRate > frequency * 2.1 {
+            if sonar == nil || sonar?.sampleRate != sampleRate || sonar?.toneFrequency != frequency {
+                sonar = SonarAnalyzer(sampleRate: sampleRate, toneFrequency: frequency)
+            }
+            for reading in sonar?.process(channels[0]) ?? [] { onSonar?(reading) }
+        }
 
         guard speechParams != nil || forwardsBuffers else { return }
         let frames = channels[0].count

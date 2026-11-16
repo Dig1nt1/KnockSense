@@ -127,6 +127,19 @@ For when you wear headphones (Settings ▸ Listen):
 * Both only act while headphones are in use (unless you turn that off), because through speakers
   the Mac would hear its own audio.
 
+## Presence (experimental): sonar
+
+Settings ▸ Presence. Like a bat, KnockSense plays a 19.5 kHz tone through the Mac's built-in speakers
+(inaudible to most adults) and listens to the echo with one built-in microphone. Mixing the echo
+down around the tone (like a Doppler radar) turns the static room into a constant, while anything
+moving in front of the Mac (even breathing) makes it wobble.
+
+1. **Test sonar on this Mac:** a guided 30-second test (sit, then walk away) tells you whether it
+   works on your hardware and calibrates the threshold.
+2. **Lock when I walk away:** after a successful test, locks the Mac once you've been gone for the
+   chosen time (keyboard/trackpad use always counts as present) and wakes the screen when you come
+   back, ready for Touch ID.
+
 ## Laptop Guard
 
 Leaving your Mac in a café or library? Click the menu-bar icon → **Laptop Guard → Arm**. After a

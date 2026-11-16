@@ -177,6 +177,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var rejectedSounds: [[Double]] = []
     public var guardSettings = GuardSettings()
     public var listen = ListenSettings()
+    public var presence = PresenceSettings()
     public var rules: [Rule] = []
     public var zones: [Zone] = []
 
@@ -201,7 +202,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case enabled, sensitivity, knockGap, playSound, ignoreWhileTyping, useBuiltInMic, autoCheckUpdates
-        case detectionSource, verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, guardSettings, listen, rules, zones
+        case detectionSource, verifyKnocks, requireConsistentPatterns, knockSamples, knockPeaks, rejectedSounds, guardSettings, listen, presence, rules, zones
     }
 
     // Tolerant decoding so older config files keep working when fields are added.
@@ -222,6 +223,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         rejectedSounds = try c.decodeIfPresent([[Double]].self, forKey: .rejectedSounds) ?? []
         guardSettings = (try? c.decodeIfPresent(GuardSettings.self, forKey: .guardSettings)) ?? GuardSettings()
         listen = (try? c.decodeIfPresent(ListenSettings.self, forKey: .listen)) ?? ListenSettings()
+        presence = (try? c.decodeIfPresent(PresenceSettings.self, forKey: .presence)) ?? PresenceSettings()
         // Lenient: a rule this version can't read (or a per-app rule from a removed feature) is skipped
         // instead of making the whole settings file unreadable.
         rules = ((try? c.decodeIfPresent([LenientRule].self, forKey: .rules)) ?? []).compactMap(\.rule)

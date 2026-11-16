@@ -742,3 +742,95 @@ final class SpeechActivityTests: XCTestCase {
     }
 }
 
+final class SonarTests: XCTestCase {
+    private let rate = 48_000.0
+    private let tone = 19_500.0
+    private var seed: UInt64 = 7
+
+    private func noise() -> Double {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Double(seed >> 11) / Double(UInt64(1) << 53) * 2 - 1
+    }
+
+    /// What the mic hears: the tone straight from the speaker, a static echo from the room, an optional
+    /// person (echo whose distance wobbles with breathing and small movements), room noise and,
+    /// optionally, music playing through the speakers.
+    private func micSignal(seconds: Double, level: Double = 0.05, person: Bool, breathingOnly: Bool = false,
+                           music: Bool = false) -> [Float] {
+        let n = Int(seconds * rate)
+        var x = [Float](repeating: 0, count: n)
+        let c = 343.0
+        for i in 0..<n {
+            let t = Double(i) / rate
+            var v = level * sin(2 * .pi * tone * t)                                   // direct path
+            v += level * 0.3 * sin(2 * .pi * tone * (t - 2 * 1.5 / c))               // wall 1.5 m away
+            if person {
+                var d = 0.5 + 0.003 * sin(2 * .pi * 0.25 * t)                          // breathing, 3 mm
+                if !breathingOnly { d += 0.01 * sin(2 * .pi * 0.9 * t) + 0.004 * sin(2 * .pi * 3.1 * t) }  // shifting
+                v += level * 0.08 * sin(2 * .pi * tone * (t - 2 * d / c))
+            }
+            if music { v += 0.2 * sin(2 * .pi * 440 * t) + 0.1 * sin(2 * .pi * 2_637 * t) }
+            v += noise() * 0.0005
+            x[i] = Float(v)
+        }
+        return x
+    }
+
+    private func readings(_ x: [Float]) -> [SonarAnalyzer.Reading] {
+        let analyzer = SonarAnalyzer(sampleRate: rate, toneFrequency: tone)
+        var out: [SonarAnalyzer.Reading] = []
+        var i = 0
+        while i < x.count {
+            out += analyzer.process(Array(x[i..<min(i + 1024, x.count)]))
+            i += 1024
+        }
+        return Array(out.dropFirst(16))      // skip the first few seconds while it settles
+    }
+
+    func testPersonIsClearlyStrongerThanEmptyRoom() {
+        let here = readings(micSignal(seconds: 10, person: true))
+        let empty = readings(micSignal(seconds: 10, person: false))
+        let result = SonarTestResult.evaluate(present: here, away: empty)
+        XCTAssertTrue(result.works, result.message)
+        XCTAssertGreaterThan(result.separation, 10)
+        XCTAssertEqual(result.toneLevel, 0.05 * 1.25, accuracy: 0.03)
+    }
+
+    func testEvenSittingStillBreathingCounts() {
+        let still = readings(micSignal(seconds: 12, person: true, breathingOnly: true))
+        let empty = readings(micSignal(seconds: 12, person: false))
+        XCTAssertTrue(SonarTestResult.evaluate(present: still, away: empty).works)
+    }
+
+    func testVolumeDoesNotChangeTheMotionReading() {
+        let loud = readings(micSignal(seconds: 8, level: 0.08, person: true))
+        let quiet = readings(micSignal(seconds: 8, level: 0.02, person: true))
+        let ratio = loud.map(\.motion).reduce(0, +) / quiet.map(\.motion).reduce(0, +)
+        XCTAssertEqual(ratio, 1, accuracy: 0.3)
+    }
+
+    func testMusicThroughTheSpeakersDoesNotLookLikeAPerson() {
+        let musicOnly = readings(micSignal(seconds: 10, person: false, music: true))
+        let here = readings(micSignal(seconds: 10, person: true))
+        XCTAssertTrue(SonarTestResult.evaluate(present: here, away: musicOnly).works)
+    }
+
+    func testReportsWhenTheToneCannotBeHeard() {
+        let silent = readings(micSignal(seconds: 6, level: 0, person: false))
+        let result = SonarTestResult.evaluate(present: silent, away: silent)
+        XCTAssertFalse(result.works)
+        XCTAssertTrue(result.message.contains("couldn't hear"))
+    }
+
+    func testPresenceTrackerLocksOnlyAfterBeingAwayAndWakesOnReturn() {
+        var tracker = PresenceTracker(threshold: 1, awaySeconds: 30)
+        XCTAssertNil(tracker.update(time: 0, motion: 5, recentInput: false))
+        XCTAssertNil(tracker.update(time: 20, motion: 0.1, recentInput: false))      // still within 30 s
+        XCTAssertNil(tracker.update(time: 25, motion: 0.1, recentInput: true))       // typing keeps it present
+        XCTAssertNil(tracker.update(time: 50, motion: 0.1, recentInput: false))
+        XCTAssertEqual(tracker.update(time: 56, motion: 0.1, recentInput: false), .left)
+        XCTAssertNil(tracker.update(time: 60, motion: 1.2, recentInput: false))       // needs a clearer signal to return
+        XCTAssertEqual(tracker.update(time: 61, motion: 3, recentInput: false), .returned)
+    }
+}
+
