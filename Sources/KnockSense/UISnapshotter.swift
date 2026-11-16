@@ -40,10 +40,25 @@ enum UISnapshotter {
         }
         host.layoutSubtreeIfNeeded()
         host.display()
-        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        // Ask the window server for the window's pixels: cacheDisplay skips layer-backed content
+        // (lists, materials, most SwiftUI text). An app may always capture its own windows.
+        if let image = captureWindow(CGWindowID(window.windowNumber)) {
+            let rep = NSBitmapImageRep(cgImage: image)
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        } else if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: url)
         }
         window.orderOut(nil)
+    }
+
+    /// CGWindowListCreateImage, looked up at run time (newer SDKs hide it in favour of ScreenCaptureKit).
+    private static func captureWindow(_ id: CGWindowID) -> CGImage? {
+        typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let handle = dlopen(nil, RTLD_NOW), let symbol = dlsym(handle, "CGWindowListCreateImage") else { return nil }
+        let capture = unsafeBitCast(symbol, to: Capture.self)
+        // .optionIncludingWindow = 1 << 3; .boundsIgnoreFraming = 1 << 0, .bestResolution = 1 << 3.
+        return capture(.null, 1 << 3, id, (1 << 0) | (1 << 3))?.takeRetainedValue()
     }
 }
