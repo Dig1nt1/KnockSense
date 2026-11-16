@@ -7,7 +7,6 @@ struct ZonesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Knock areas").font(.title2.bold())
             Text("Optional: teach KnockSense the spots you knock on, e.g. “Left palm rest”, “Right of trackpad” or “Lid”. Add an area, click Train, then knock \(AppState.trainingKnocks) times on that spot the same way you'll knock later. Spots that are far apart and made of different parts of the case are easiest to tell apart.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

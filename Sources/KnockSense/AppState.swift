@@ -64,6 +64,8 @@ final class AppState: ObservableObject {
     static let maxRejectedSounds = 100
     /// The running app's state, for AppKit callbacks that live outside SwiftUI.
     static weak var current: AppState?
+    /// `--ui-snapshots <folder>`: render the UI to images (used by CI) without touching the mic or settings.
+    static let isSnapshotMode = CommandLine.arguments.contains("--ui-snapshots")
 
     @Published var config: AppConfig {
         didSet { configDidChange(from: oldValue) }
@@ -226,6 +228,16 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 self?.poll()
             }
+        }
+
+        AppState.current = self
+        if Self.isSnapshotMode {
+            // Example activity so the screenshots look like real use.
+            appendLog("Sonar: welcome back")
+            appendLog("Laptop Guard off (Mac unlocked)")
+            appendLog("2 knocks → Play / pause")
+            lastKnock = "Knock · strength 0.31"
+            return
         }
 
         updater.startAutomaticChecks { [weak self] in self?.config.autoCheckUpdates ?? false }

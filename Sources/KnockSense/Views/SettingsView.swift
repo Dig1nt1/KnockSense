@@ -2,24 +2,156 @@ import ServiceManagement
 import SwiftUI
 import KnockCore
 
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            RulesView()
-                .tabItem { Label("Actions", systemImage: "bolt.fill") }
-            ZonesView()
-                .tabItem { Label("Areas", systemImage: "square.grid.2x2") }
-            ListenView()
-                .tabItem { Label("Listen", systemImage: "ear") }
-            GuardTab()
-                .tabItem { Label("Guard", systemImage: "lock.shield") }
-            PresenceView()
-                .tabItem { Label("Presence", systemImage: "dot.radiowaves.left.and.right") }
-            GeneralView()
-                .tabItem { Label("General", systemImage: "gearshape") }
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case actions, areas, listen, laptopGuard, presence, general
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .actions: return "Actions"
+        case .areas: return "Areas"
+        case .listen: return "Listen"
+        case .laptopGuard: return "Laptop Guard"
+        case .presence: return "Presence"
+        case .general: return "General"
         }
-        .padding()
-        .frame(minWidth: 640, minHeight: 460)
+    }
+
+    var subtitle: String {
+        switch self {
+        case .actions: return "What each knock does"
+        case .areas: return "Different spots, different actions"
+        case .listen: return "Your name and voices nearby"
+        case .laptopGuard: return "Alarm when someone touches your Mac"
+        case .presence: return "Sonar: lock when you walk away"
+        case .general: return "Detection, permissions, updates"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .actions: return "bolt.fill"
+        case .areas: return "square.grid.2x2.fill"
+        case .listen: return "ear.fill"
+        case .laptopGuard: return "lock.shield.fill"
+        case .presence: return "dot.radiowaves.left.and.right"
+        case .general: return "gearshape.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .actions: return .orange
+        case .areas: return .teal
+        case .listen: return .pink
+        case .laptopGuard: return .red
+        case .presence: return .indigo
+        case .general: return .gray
+        }
+    }
+}
+
+/// Settings window: a System Settings–style sidebar with one page per feature.
+struct SettingsView: View {
+    @EnvironmentObject var state: AppState
+    @State private var selection: SettingsPage?
+
+    init(initialPage: SettingsPage = .actions) {
+        _selection = State(initialValue: initialPage)
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            VStack(spacing: 0) {
+                SidebarHeader(version: state.updater.versionText)
+                List(SettingsPage.allCases, selection: $selection) { page in
+                    SidebarRow(page: page).tag(page)
+                }
+                .listStyle(.sidebar)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+        } detail: {
+            let page = selection ?? .actions
+            VStack(spacing: 0) {
+                PageHeader(page: page)
+                pageContent(page)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+        .frame(minWidth: 860, minHeight: 600)
+    }
+
+    @ViewBuilder
+    private func pageContent(_ page: SettingsPage) -> some View {
+        switch page {
+        case .actions: RulesView().padding(.horizontal, 24).padding(.bottom, 20)
+        case .areas: ZonesView().padding(.horizontal, 24).padding(.bottom, 20)
+        case .listen: ListenView()
+        case .laptopGuard: GuardTab()
+        case .presence: PresenceView()
+        case .general: GeneralView()
+        }
+    }
+}
+
+private struct SidebarHeader: View {
+    let version: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("KnockSense").font(.headline)
+                Text(version).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+}
+
+private struct SidebarRow: View {
+    let page: SettingsPage
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: page.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(page.tint.gradient))
+            Text(page.title)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Big title + one-line description at the top of every settings page.
+private struct PageHeader: View {
+    let page: SettingsPage
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: page.icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(page.tint.gradient))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(page.title).font(.system(size: 22, weight: .bold))
+                Text(page.subtitle).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 10)
     }
 }
 

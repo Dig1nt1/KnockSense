@@ -10,7 +10,6 @@ struct RulesView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Knock actions").font(.title2.bold())
                     Text("Choose what happens when you knock on your Mac. A rule for a specific area beats an “anywhere” rule.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

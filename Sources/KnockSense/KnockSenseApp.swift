@@ -28,6 +28,21 @@ struct KnockSenseApp: App {
 /// user opens KnockSense again from Finder / Launchpad / Spotlight while it's running, show the window.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard AppState.isSnapshotMode else { return }
+        let arguments = CommandLine.arguments
+        let folder = arguments.firstIndex(of: "--ui-snapshots").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+            ?? NSTemporaryDirectory() + "knocksense-ui"
+        // AppState is created when SwiftUI first builds the menu bar item; give it a moment.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if let state = AppState.current {
+                UISnapshotter.run(state: state, folder: URL(fileURLWithPath: folder))
+            } else {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if let state = AppState.current {
             SettingsWindowController.shared.show(state: state)
@@ -47,8 +62,10 @@ final class SettingsWindowController {
             let host = NSHostingController(rootView: SettingsView().environmentObject(state))
             let window = NSWindow(contentViewController: host)
             window.title = "KnockSense"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 720, height: 540))
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.setContentSize(NSSize(width: 900, height: 640))
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window

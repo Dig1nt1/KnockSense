@@ -5,86 +5,200 @@ struct MenuView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "hand.tap.fill")
-                    .foregroundStyle(Color.accentColor)
-                Text("KnockSense").font(.headline)
-                Spacer()
-                Toggle("Enabled", isOn: $state.config.enabled)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-            }
-
-            StatusLine()
-
-            LevelMeter(model: state.levelModel)
-                .frame(height: 6)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("Sensitivity")
-                    Spacer()
-                    Text(sensitivityLabel(state.config.sensitivity)).foregroundStyle(.secondary)
-                }
-                .font(.caption)
-                Slider(value: $state.config.sensitivity, in: 0...1)
-            }
-
-            Text(state.lastKnock)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-
-            if state.canMarkLastAsNotMe {
-                Button {
-                    state.markLastAsNotMe()
-                } label: {
-                    Label("That wasn't me — ignore sounds like that", systemImage: "hand.raised")
-                }
-                .font(.caption)
-                .help("Teaches KnockSense that the sound which just ran an action wasn't your knock.")
-            }
-
-            if state.config.verifyKnocks && state.trainedKnockCount < KnockVerifier.minimumSamples && state.training == nil {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "lightbulb").foregroundStyle(.yellow)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Doors or other noises setting it off? Teach KnockSense your knock (8 knocks).")
-                            .font(.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Teach My Knock") { state.startKnockTraining() }
-                            .font(.caption)
-                    }
-                }
-            }
-
-            if !state.log.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(state.log.prefix(4)) { entry in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(entry.date, style: .time).foregroundStyle(.tertiary)
-                            Text(entry.text).lineLimit(1)
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-
-            Divider()
-            GuardMenuRow(guardian: state.guardian)
-            Divider()
-            UpdateControls(updater: state.updater, compact: true)
-            Divider()
-            HStack {
-                Button("Settings…") { SettingsWindowController.shared.show(state: state) }
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
-            }
+        VStack(spacing: 10) {
+            header
+            notices
+            liveCard
+            Card { GuardMenuRow(guardian: state.guardian) }
+            if !state.log.isEmpty { activityCard }
+            footer
         }
         .padding(14)
-        .frame(width: 310)
+        .frame(width: 320)
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 36, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("KnockSense").font(.system(size: 15, weight: .semibold))
+                StatusLine()
+            }
+            Spacer(minLength: 8)
+            Toggle("Listen for knocks", isOn: $state.config.enabled)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .help(state.config.enabled ? "Pause KnockSense" : "Turn KnockSense on")
+        }
+        .padding(.horizontal, 2)
+    }
+
+    // MARK: Notices (only when something needs attention)
+
+    @ViewBuilder private var notices: some View {
+        if state.config.detectionSource == .microphone && state.micStatus == .denied {
+            NoticeRow(icon: "mic.slash.fill", tint: .red, text: "Microphone access is off",
+                      buttonTitle: "Open Settings") { Permissions.openMicrophoneSettings() }
+        } else if state.config.detectionSource == .microphone && state.micProblem != nil {
+            NoticeRow(icon: "mic.badge.xmark", tint: .red, text: "The microphone isn't sending sound",
+                      buttonTitle: "Fix") { state.fixMicrophoneAccess() }
+        }
+        if state.canMarkLastAsNotMe {
+            NoticeRow(icon: "hand.raised.fill", tint: .orange, text: "Wasn't you? Ignore sounds like that",
+                      buttonTitle: "Not Me") { state.markLastAsNotMe() }
+        }
+        if state.config.verifyKnocks && state.trainedKnockCount < KnockVerifier.minimumSamples && state.training == nil {
+            NoticeRow(icon: "lightbulb.fill", tint: .yellow, text: "Teach KnockSense your knock to ignore doors and noise",
+                      buttonTitle: "Teach") { state.startKnockTraining() }
+        }
+    }
+
+    // MARK: Live meter + sensitivity
+
+    private var liveCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    CardTitle("Live", icon: "waveform")
+                    Spacer()
+                    Text(state.config.detectionSource == .motion ? "Motion sensor" : "Microphone")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                LevelMeter(model: state.levelModel).frame(height: 6)
+                Text(state.lastKnock)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Divider().opacity(0.6)
+                HStack {
+                    Text("Sensitivity").font(.caption.weight(.medium))
+                    Spacer()
+                    Text(sensitivityLabel(state.config.sensitivity)).font(.caption).foregroundStyle(.secondary)
+                }
+                Slider(value: $state.config.sensitivity, in: 0...1)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: Recent activity
+
+    private var activityCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 7) {
+                CardTitle("Recent", icon: "clock")
+                ForEach(state.log.prefix(3)) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(entry.date, style: .time)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 54, alignment: .leading)
+                        Text(entry.text).font(.caption).lineLimit(1)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        VStack(spacing: 6) {
+            UpdateStatusNote(updater: state.updater)
+            HStack(spacing: 4) {
+                FooterButton(title: "Settings", icon: "gearshape") { SettingsWindowController.shared.show(state: state) }
+                UpdateFooterButton(updater: state.updater)
+                Spacer()
+                FooterButton(title: "Quit", icon: "power") { NSApp.terminate(nil) }
+            }
+        }
+        .padding(.top, 2)
+    }
+}
+
+// MARK: - Building blocks
+
+/// A soft rounded panel used to group things in the menu.
+struct Card<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
+    }
+}
+
+struct CardTitle: View {
+    let title: String
+    let icon: String
+
+    init(_ title: String, icon: String) {
+        self.title = title
+        self.icon = icon
+    }
+
+    var body: some View {
+        Label(title, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+    }
+}
+
+/// One-line notice with an action, e.g. a permission problem or a tip.
+struct NoticeRow: View {
+    let icon: String
+    let tint: Color
+    let text: String
+    let buttonTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 18)
+            Text(text)
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            Button(buttonTitle, action: action)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tint.opacity(0.12)))
+    }
+}
+
+struct FooterButton: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -92,18 +206,12 @@ struct StatusLine: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(text).font(.caption)
-            Spacer()
-            if state.config.detectionSource == .microphone && state.micProblem != nil {
-                Button("Fix") { state.fixMicrophoneAccess() }
-                    .font(.caption)
-            }
-            if state.config.detectionSource == .microphone && state.micStatus == .denied {
-                Button("Open Settings") { Permissions.openMicrophoneSettings() }
-                    .font(.caption)
-            }
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 
@@ -152,9 +260,10 @@ struct LevelMeter: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.2))
+                Capsule().fill(Color.primary.opacity(0.08))
                 Capsule()
-                    .fill(LinearGradient(colors: [.green, .yellow, .red], startPoint: .leading, endPoint: .trailing))
+                    .fill(LinearGradient(colors: [Color.accentColor.opacity(0.65), Color.accentColor],
+                                         startPoint: .leading, endPoint: .trailing))
                     .frame(width: geo.size.width * normalized)
                     .animation(.linear(duration: 0.08), value: normalized)
             }

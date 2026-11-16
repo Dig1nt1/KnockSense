@@ -50,6 +50,27 @@ jobs:
             exit 1
           fi
 
+      - name: UI snapshots (for design review)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OUT="$RUNNER_TEMP/ui"
+          mkdir -p "$OUT"
+          build/KnockSense.app/Contents/MacOS/KnockSense --ui-snapshots "$OUT" &
+          PID=$!
+          for i in $(seq 1 90); do sleep 1; kill -0 $PID 2>/dev/null || break; done
+          kill $PID 2>/dev/null || true
+          ls -la "$OUT"
+          cd "$OUT"
+          git init -q
+          git checkout -q -b ui-snapshots
+          git add .
+          git -c user.name="KnockSense CI" -c user.email="ci@users.noreply.github.com" commit -qm "UI snapshots for ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ui-snapshots
+
       - name: Smoke test motion helper (starts as root and answers)
         timeout-minutes: 2
         run: |
