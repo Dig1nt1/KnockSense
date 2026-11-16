@@ -42,7 +42,7 @@ struct PresenceView: View {
                     Slider(value: $state.config.presence.awaySeconds, in: 10...180, step: 5)
                 }
                 Toggle("Wake the screen when I come back (ready for Touch ID)", isOn: $state.config.presence.wakeOnReturn)
-                Text("Using the keyboard or trackpad always counts as being here. The tone only plays while this is on. It needs sound from the Mac's own speakers at a reasonable volume; children and pets may hear very high tones.")
+                Text("Using the keyboard or trackpad always counts as being here. If the Mac is muted or the volume is very low, sonar pauses and never locks. The tone only plays while this is on; children and pets may hear very high tones.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -50,7 +50,7 @@ struct PresenceView: View {
             if let reading = state.sonarReading {
                 Section("Live sonar") {
                     SonarMeter(title: "Echo strength", value: reading.toneLevel, low: 0.0003, high: 0.2,
-                               detail: reading.toneLevel < 0.0005 ? "Too weak, turn the volume up" : "OK")
+                               detail: reading.toneLevel < 0.0008 ? "Too quiet: sonar paused (won't lock). Turn the volume up." : "OK")
                     SonarMeter(title: "Movement in front of the Mac", value: reading.motion, low: 1e-7, high: 1e-1,
                                detail: movementDetail(reading.motion))
                     if state.config.presence.lockWhenAway && state.config.presence.canLock {

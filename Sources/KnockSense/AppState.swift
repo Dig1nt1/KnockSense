@@ -602,7 +602,10 @@ final class AppState: ObservableObject {
         default: break
         }
         guard !sonarTestRunning, var tracker = presenceTracker, !guardian.isActive else { return }
-        let recentInput = GuardSystem.secondsSinceAnyInput() < 5
+        // If the tone is too quiet to measure (Mac muted or volume very low), sonar can't see anyone,
+        // so play safe: count it as "still here" rather than locking someone out.
+        let toneTooWeak = reading.toneLevel < 0.0008
+        let recentInput = toneTooWeak || GuardSystem.secondsSinceAnyInput() < 5
         let change = tracker.update(time: ProcessInfo.processInfo.systemUptime, motion: reading.motion, recentInput: recentInput)
         presenceTracker = tracker
         someonePresent = tracker.isPresent
