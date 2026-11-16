@@ -7,37 +7,37 @@ struct RulesView: View {
     @State private var editing: Rule?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Choose what happens when you knock on your Mac. A rule for a specific area beats an “anywhere” rule.")
+        Form {
+            Section {
+                if state.config.rules.isEmpty {
+                    Text("No actions yet. Click “Add Action” to create one.")
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button {
-                    editing = Rule(name: "", knockCount: 2, action: .builtin(.playPause))
-                } label: {
-                    Label("Add Action", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            if state.config.rules.isEmpty {
-                Spacer()
-                Text("No actions yet. Click “Add Action” to create one.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                Spacer()
-            } else {
-                List {
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                } else {
                     ForEach(state.config.rules) { rule in
                         RuleRow(rule: rule, onEdit: { editing = rule })
                     }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+            } header: {
+                HStack {
+                    Text("Your knock actions")
+                    Spacer()
+                    Button {
+                        editing = Rule(name: "", knockCount: 2, action: .builtin(.playPause))
+                    } label: {
+                        Label("Add Action", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            } footer: {
+                Text("A rule for a specific area beats an “anywhere” rule. Double or triple knocks are the most reliable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+        .formStyle(.grouped)
         .sheet(item: $editing) { rule in
             RuleEditor(draft: rule, isNew: !state.config.rules.contains { $0.id == rule.id }) { saved in
                 state.upsert(saved)
@@ -66,12 +66,16 @@ struct RuleRow: View {
             }
             Spacer()
             Button("Test") { ActionRunner.run(rule.action) }
+                .controlSize(.small)
             Button { onEdit() } label: { Image(systemName: "pencil") }
+                .buttonStyle(.borderless)
                 .help("Edit")
             Button(role: .destructive) { state.deleteRule(rule.id) } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
                 .help("Delete")
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
         .opacity(rule.enabled ? 1 : 0.5)
     }
 

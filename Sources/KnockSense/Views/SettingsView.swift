@@ -85,8 +85,8 @@ struct SettingsView: View {
     @ViewBuilder
     private func pageContent(_ page: SettingsPage) -> some View {
         switch page {
-        case .actions: RulesView().padding(.horizontal, 24).padding(.bottom, 20)
-        case .areas: ZonesView().padding(.horizontal, 24).padding(.bottom, 20)
+        case .actions: RulesView()
+        case .areas: ZonesView()
         case .listen: ListenView()
         case .laptopGuard: GuardTab()
         case .presence: PresenceView()

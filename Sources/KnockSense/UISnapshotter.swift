@@ -31,7 +31,7 @@ enum UISnapshotter {
         window.titleVisibility = .hidden
         window.contentView = host
         window.orderFrontRegardless()
-        try? await Task.sleep(nanoseconds: 900_000_000)       // let SwiftUI lay out and draw
+        try? await Task.sleep(nanoseconds: 1_500_000_000)     // let SwiftUI lay out and draw
         if height == nil {
             let fitted = CGSize(width: width, height: max(200, host.fittingSize.height))
             window.setContentSize(fitted)
