@@ -853,15 +853,64 @@ final class SonarTests: XCTestCase {
         XCTAssertTrue(result.message.contains("couldn't hear"))
     }
 
-    func testPresenceTrackerLocksOnlyAfterBeingAwayAndWakesOnReturn() {
-        var tracker = PresenceTracker(threshold: 1, awaySeconds: 30)
-        XCTAssertNil(tracker.update(time: 0, motion: 5, recentInput: false))
-        XCTAssertNil(tracker.update(time: 20, motion: 0.1, recentInput: false))      // still within 30 s
-        XCTAssertNil(tracker.update(time: 25, motion: 0.1, recentInput: true))       // typing keeps it present
-        XCTAssertNil(tracker.update(time: 50, motion: 0.1, recentInput: false))
-        XCTAssertEqual(tracker.update(time: 56, motion: 0.1, recentInput: false), .left)
-        XCTAssertNil(tracker.update(time: 60, motion: 1.2, recentInput: false))       // needs a clearer signal to return
-        XCTAssertEqual(tracker.update(time: 61, motion: 3, recentInput: false), .returned)
+    private func tracker() -> PresenceTracker {
+        PresenceTracker(threshold: 1, departureLevel: 10, awaySeconds: 60)
+    }
+
+    func testSittingStillNeverLocks() {
+        var t = tracker()
+        _ = t.update(time: 0, motion: 4, recentInput: true)                 // typing
+        for second in stride(from: 1.0, through: 600, by: 0.25) {           // 10 minutes reading, barely moving
+            XCTAssertNil(t.update(time: second, motion: 0.3, recentInput: false), "at \(second) s")
+        }
+        XCTAssertEqual(t.state, .present)
+    }
+
+    func testWalkingAwayWarnsThenLocks() {
+        var t = tracker()
+        _ = t.update(time: 0, motion: 3, recentInput: false)
+        XCTAssertNil(t.update(time: 5, motion: 25, recentInput: false))     // stands up and walks off
+        var changes: [(PresenceTracker.Change, Double)] = []
+        for second in stride(from: 6.0, through: 80, by: 0.25) {
+            if let change = t.update(time: second, motion: 0.2, recentInput: false) { changes.append((change, second)) }
+        }
+        XCTAssertEqual(changes.map(\.0), [.warning, .left])
+        XCTAssertEqual(changes[0].1, 55, accuracy: 0.5)                     // 10 s warning…
+        XCTAssertEqual(changes[1].1, 65, accuracy: 0.5)                     // …then lock after 60 s away
+        XCTAssertEqual(t.update(time: 90, motion: 3, recentInput: false), .returned)
+    }
+
+    func testWarningIsCancelledByMovementOrTyping() {
+        var t = tracker()
+        _ = t.update(time: 0, motion: 25, recentInput: false)               // reached for something
+        var warned = false
+        for second in stride(from: 1.0, through: 55, by: 0.25) where t.update(time: second, motion: 0.2, recentInput: false) == .warning {
+            warned = true
+        }
+        XCTAssertTrue(warned)
+        XCTAssertEqual(t.update(time: 56, motion: 0.2, recentInput: true), .cancelled)   // touched the trackpad
+        for second in stride(from: 57.0, through: 400, by: 0.25) {
+            XCTAssertNil(t.update(time: second, motion: 0.2, recentInput: false))         // no new departure → no lock
+        }
+    }
+
+    func testNeverLocksWhileAVideoKeepsTheDisplayAwake() {
+        var t = tracker()
+        _ = t.update(time: 0, motion: 25, recentInput: false)
+        for second in stride(from: 1.0, through: 300, by: 0.25) {
+            XCTAssertNil(t.update(time: second, motion: 0.1, recentInput: false, displayHeldAwake: true))
+        }
+    }
+
+    func testTestCalibrationLearnsDepartureFromWalkingAway() {
+        func r(_ m: Double) -> SonarAnalyzer.Reading { SonarAnalyzer.Reading(motion: m, toneLevel: 0.005) }
+        let present = (0..<30).map { _ in r(5e-3) }
+        let leaving = [r(2e-3), r(4e-2), r(8e-2), r(3e-2)]
+        let away = (0..<40).map { i in r(i % 5 == 0 ? 8e-4 : 5e-4) }
+        let result = SonarTestResult.evaluate(present: present, leaving: leaving, away: away)
+        XCTAssertTrue(result.works)
+        XCTAssertEqual(result.threshold ?? 0, 1.04e-3, accuracy: 1e-4)     // just above the empty room
+        XCTAssertEqual(result.departureLevel ?? 0, 3.2e-2, accuracy: 1e-3)  // 40% of the walk-away peak
     }
 }
 

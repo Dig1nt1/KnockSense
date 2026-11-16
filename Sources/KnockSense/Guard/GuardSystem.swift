@@ -24,6 +24,15 @@ enum GuardSystem {
         IOPMAssertionRelease(assertion)
     }
 
+    /// True when some app is keeping the display awake (video, call, presentation): the same signal
+    /// macOS uses to hold off the screen saver.
+    static func displayHeldAwake() -> Bool {
+        var status: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsStatus(&status) == kIOReturnSuccess,
+              let values = status?.takeRetainedValue() as? [String: Int] else { return false }
+        return (values["PreventUserIdleDisplaySleep"] ?? 0) > 0 || (values["NoDisplaySleepAssertion"] ?? 0) > 0
+    }
+
     static func isOnACPower() -> Bool {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }

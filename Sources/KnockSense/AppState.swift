@@ -115,6 +115,7 @@ final class AppState: ObservableObject {
     private var sonarTestTask: Task<Void, Never>?
     private var testPresentReadings: [SonarAnalyzer.Reading] = []
     private var testAwayReadings: [SonarAnalyzer.Reading] = []
+    private var testLeavingReadings: [SonarAnalyzer.Reading] = []
     private var volumeBeforeTest: GuardSystem.VolumeState?
     private var screenLocked = false
     private var screenObservers: [NSObjectProtocol] = []
@@ -575,11 +576,13 @@ final class AppState: ObservableObject {
                 do { try sonarEmitter.start() } catch { appendLog("Sonar couldn't start: \(error.localizedDescription)") }
             }
             audio.setSonarWatch(SonarEmitter.frequency)
-            if config.presence.lockWhenAway, let threshold = config.presence.testResult?.threshold {
+            if config.presence.lockWhenAway, config.presence.canLock,
+               let threshold = config.presence.testResult?.threshold,
+               let departure = config.presence.testResult?.departureLevel {
                 if presenceTracker == nil {
-                    presenceTracker = PresenceTracker(threshold: threshold, awaySeconds: config.presence.awaySeconds)
+                    presenceTracker = PresenceTracker(threshold: threshold, departureLevel: departure,
+                                                      awaySeconds: config.presence.awaySeconds)
                 } else {
-                    presenceTracker?.threshold = threshold
                     presenceTracker?.awaySeconds = config.presence.awaySeconds
                 }
             } else {
@@ -598,6 +601,7 @@ final class AppState: ObservableObject {
         sonarReading = reading
         switch sonarTest {
         case .sitting: testPresentReadings.append(reading)
+        case .leaving: testLeavingReadings.append(reading)
         case .away: testAwayReadings.append(reading)
         default: break
         }
@@ -606,10 +610,20 @@ final class AppState: ObservableObject {
         // so play safe: count it as "still here" rather than locking someone out.
         let toneTooWeak = reading.toneLevel < 0.0008
         let recentInput = toneTooWeak || GuardSystem.secondsSinceAnyInput() < 5
-        let change = tracker.update(time: ProcessInfo.processInfo.systemUptime, motion: reading.motion, recentInput: recentInput)
+        let change = tracker.update(time: ProcessInfo.processInfo.systemUptime, motion: reading.motion,
+                                    recentInput: recentInput, displayHeldAwake: GuardSystem.displayHeldAwake())
         presenceTracker = tracker
         someonePresent = tracker.isPresent
         switch change {
+        case .warning:
+            guard !screenLocked else { break }
+            AlertBanner.shared.show(title: "Are you still there?",
+                                    subtitle: "Locking in \(Int(tracker.warningSeconds)) seconds. Move or touch the trackpad to stay.")
+            NSSound(named: "Pop")?.play()
+            suppressUntil = ProcessInfo.processInfo.systemUptime + 0.5
+            appendLog("Sonar: looks like you left — locking in \(Int(tracker.warningSeconds)) s unless you move")
+        case .cancelled:
+            appendLog("Sonar: you're still here — not locking")
         case .left:
             guard !screenLocked else { break }
             appendLog("Sonar: you walked away — locking your Mac")
@@ -626,7 +640,8 @@ final class AppState: ObservableObject {
         screenLocked = false
         // Unlocking means you're here: start the "away" clock from now.
         if let tracker = presenceTracker {
-            presenceTracker = PresenceTracker(threshold: tracker.threshold, awaySeconds: tracker.awaySeconds)
+            presenceTracker = PresenceTracker(threshold: tracker.threshold, departureLevel: tracker.departureLevel,
+                                              awaySeconds: tracker.awaySeconds)
             someonePresent = true
         }
     }
@@ -639,6 +654,7 @@ final class AppState: ObservableObject {
             GuardSystem.setVolume(.init(level: 50, muted: false))
         }
         testPresentReadings = []
+        testLeavingReadings = []
         testAwayReadings = []
         sonarTest = .preparing
         if !config.enabled { config.enabled = true }
@@ -658,11 +674,13 @@ final class AppState: ObservableObject {
             self.testPresentReadings = []
             guard await countdown(8, { .sitting(secondsLeft: $0) }) else { return }
             NSSound(named: "Tink")?.play()                                // "walk away now"
+            self.testLeavingReadings = []
             guard await countdown(8, { .leaving(secondsLeft: $0) }) else { return }
             self.testAwayReadings = []
             guard await countdown(10, { .away(secondsLeft: $0) }) else { return }
             NSSound(named: "Glass")?.play()                               // "come back"
-            let result = SonarTestResult.evaluate(present: self.testPresentReadings, away: self.testAwayReadings)
+            let result = SonarTestResult.evaluate(present: self.testPresentReadings, leaving: self.testLeavingReadings,
+                                                  away: self.testAwayReadings)
             self.finishSonarTest(result)
         }
     }

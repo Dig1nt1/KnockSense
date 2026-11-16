@@ -30,7 +30,12 @@ struct PresenceView: View {
             Section("2. Lock when I walk away") {
                 Toggle("Lock my Mac when I walk away", isOn: $state.config.presence.lockWhenAway)
                     .disabled(!state.config.presence.canLock)
-                if !state.config.presence.canLock {
+                if state.config.presence.needsRetest {
+                    Label("Sonar got smarter: please run the test once more so it learns what you walking away looks like.",
+                          systemImage: "arrow.clockwise.circle.fill")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !state.config.presence.canLock {
                     Text("Available after a successful sonar test.").font(.caption).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading) {
@@ -42,7 +47,7 @@ struct PresenceView: View {
                     Slider(value: $state.config.presence.awaySeconds, in: 10...180, step: 5)
                 }
                 Toggle("Wake the screen when I come back (ready for Touch ID)", isOn: $state.config.presence.wakeOnReturn)
-                Text("Using the keyboard or trackpad always counts as being here. If the Mac is muted or the volume is very low, sonar pauses and never locks. The tone only plays while this is on; children and pets may hear very high tones.")
+                Text("It only locks after it sees you get up and walk away, then nothing for this long. You get a 10-second warning first (move or touch anything to cancel). It never locks while you type, while a video or call keeps the screen awake, or when the Mac is muted. Children and pets may hear very high tones.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

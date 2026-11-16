@@ -185,33 +185,68 @@ public final class SonarAnalyzer {
 
 // MARK: - Presence decisions
 
-/// Turns sonar readings and keyboard/trackpad activity into "someone is here" / "they left".
+/// Decides when someone has really left. Locking needs all of:
+/// - a **departure**: a burst of strong movement with no typing (getting up and walking away),
+/// - then nothing for `awaySeconds`: no movement above `threshold`, no keyboard/trackpad use, and no
+///   app keeping the display awake (video, call, presentation),
+/// - and a `warningSeconds` warning first, which any movement or input cancels.
+/// Sitting still never produces a departure, so it never locks someone who is just reading.
 public struct PresenceTracker: Sendable {
-    public enum Change: Equatable, Sendable { case left, returned }
+    public enum Change: Equatable, Sendable { case warning, cancelled, left, returned }
+    public enum State: Equatable, Sendable { case present, warning, away }
 
-    /// Motion reading above which someone counts as present (from the sonar test).
     public var threshold: Double
-    /// How long without any sign of a person before they count as gone.
+    public var departureLevel: Double
     public var awaySeconds: Double
-    public private(set) var isPresent = true
-    private var lastSeen: Double?
+    public var warningSeconds: Double = 10
+    /// The departure must happen within this long of the last sign of the person.
+    public var departureWindow: Double = 15
+    public private(set) var state: State = .present
+    public var isPresent: Bool { state != .away }
 
-    public init(threshold: Double, awaySeconds: Double) {
+    private var lastSeen: Double?
+    private var lastDeparture: Double?
+
+    public init(threshold: Double, departureLevel: Double, awaySeconds: Double) {
         self.threshold = threshold
+        self.departureLevel = max(departureLevel, threshold * 2)
         self.awaySeconds = awaySeconds
     }
 
-    public mutating func update(time: Double, motion: Double, recentInput: Bool) -> Change? {
+    public mutating func update(time: Double, motion: Double, recentInput: Bool, displayHeldAwake: Bool = false) -> Change? {
         if lastSeen == nil { lastSeen = time }
-        let seen = recentInput || motion > (isPresent ? threshold : threshold * 1.5)
+        if motion > departureLevel && !recentInput { lastDeparture = time }
+        let returnBar = state == .away ? threshold * 1.5 : threshold
+        let seen = recentInput || displayHeldAwake || motion > returnBar
         if seen { lastSeen = time }
-        if isPresent, let last = lastSeen, time - last > awaySeconds {
-            isPresent = false
-            return .left
-        }
-        if !isPresent, seen {
-            isPresent = true
-            return .returned
+        let quietFor = time - (lastSeen ?? time)
+        let departed: Bool = {
+            guard let departure = lastDeparture, let seenAt = lastSeen else { return false }
+            return seenAt - departure <= departureWindow
+        }()
+
+        switch state {
+        case .present:
+            if departed && quietFor >= max(0, awaySeconds - warningSeconds) {
+                state = .warning
+                return .warning
+            }
+        case .warning:
+            if seen {
+                state = .present
+                lastDeparture = nil
+                return .cancelled
+            }
+            if quietFor >= awaySeconds {
+                state = .away
+                return .left
+            }
+        case .away:
+            if seen {
+                state = .present
+                lastDeparture = nil
+                return .returned
+            }
         }
         return nil
     }
@@ -223,6 +258,8 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
     public let works: Bool
     /// Suggested presence threshold (nil when it doesn't work).
     public let threshold: Double?
+    /// Movement level that means "getting up / walking away" (nil for results from older versions).
+    public var departureLevel: Double?
     /// How many times stronger the motion signal was with the person there than away.
     public let separation: Double
     public let toneLevel: Double
@@ -231,7 +268,8 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
     public let message: String
 
     /// Judges a test from readings taken while the user sat at the Mac and while they were away.
-    public static func evaluate(present: [SonarAnalyzer.Reading], away: [SonarAnalyzer.Reading]) -> SonarTestResult {
+    public static func evaluate(present: [SonarAnalyzer.Reading], leaving: [SonarAnalyzer.Reading] = [],
+                                away: [SonarAnalyzer.Reading]) -> SonarTestResult {
         func median(_ values: [Double]) -> Double {
             let sorted = values.sorted()
             return sorted.isEmpty ? 0 : sorted[sorted.count / 2]
@@ -256,9 +294,14 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
             return SonarTestResult(works: false, threshold: nil, separation: separation, toneLevel: tone,
                                    details: details, message: String(format: "Sonar couldn't reliably tell you apart from an empty room (only %.1f× difference). Try again somewhere quieter, with nobody else moving nearby, and walk at least 3 metres away.", separation))
         }
-        // Between the two, leaning towards "present" so it doesn't lock while you're there.
-        let threshold = min((here * empty).squareRoot(), here * 0.5)
-        return SonarTestResult(works: true, threshold: threshold, separation: separation, toneLevel: tone,
+        // Just above the empty room, so even small movements and breathing count as "here".
+        let emptyMedian = median(away.map(\.motion))
+        let threshold = min(max(empty * 1.3, emptyMedian * 2), here * 0.3)
+        // Walking away is the strongest movement in the test; a fraction of its peak marks a departure.
+        let walkPeak = leaving.map(\.motion).max() ?? 0
+        let departure = max(walkPeak * 0.4, here * 1.5, threshold * 3)
+        return SonarTestResult(works: true, threshold: threshold, departureLevel: departure,
+                               separation: separation, toneLevel: tone,
                                details: details, message: String(format: "Sonar works on your Mac: the signal was %.0f× stronger with you there than with the room empty.", separation))
     }
 }
@@ -285,7 +328,13 @@ public struct PresenceSettings: Codable, Equatable, Sendable {
         testResult = (try? c.decodeIfPresent(SonarTestResult.self, forKey: .testResult)) ?? nil
     }
 
-    /// Lock-when-away only runs after a successful sonar test.
-    public var canLock: Bool { testResult?.works == true && testResult?.threshold != nil }
+    /// Lock-when-away only runs after a successful sonar test from this version (which also learned
+    /// what walking away looks like).
+    public var canLock: Bool {
+        testResult?.works == true && testResult?.threshold != nil && testResult?.departureLevel != nil
+    }
+
+    /// A test passed with an older version that didn't learn walking away yet.
+    public var needsRetest: Bool { testResult?.works == true && testResult?.departureLevel == nil }
 }
 
