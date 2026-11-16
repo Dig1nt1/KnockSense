@@ -756,7 +756,7 @@ final class SonarTests: XCTestCase {
     /// person (echo whose distance wobbles with breathing and small movements), room noise and,
     /// optionally, music playing through the speakers.
     private func micSignal(seconds: Double, level: Double = 0.05, person: Bool, breathingOnly: Bool = false,
-                           music: Bool = false) -> [Float] {
+                           music: Bool = false, hiss: Double = 0.0005, personEcho: Double = 0.08) -> [Float] {
         let n = Int(seconds * rate)
         var x = [Float](repeating: 0, count: n)
         let c = 343.0
@@ -767,13 +767,17 @@ final class SonarTests: XCTestCase {
             if person {
                 var d = 0.5 + 0.003 * sin(2 * .pi * 0.25 * t)                          // breathing, 3 mm
                 if !breathingOnly { d += 0.01 * sin(2 * .pi * 0.9 * t) + 0.004 * sin(2 * .pi * 3.1 * t) }  // shifting
-                v += level * 0.08 * sin(2 * .pi * tone * (t - 2 * d / c))
+                v += level * personEcho * sin(2 * .pi * tone * (t - 2 * d / c))
             }
             if music { v += 0.2 * sin(2 * .pi * 440 * t) + 0.1 * sin(2 * .pi * 2_637 * t) }
-            v += noise() * 0.0005
+            v += noise() * hiss
             x[i] = Float(v)
         }
         return x
+    }
+
+    func probeReadings(level: Double, person: Bool, hiss: Double, echo: Double) -> [SonarAnalyzer.Reading] {
+        readings(micSignal(seconds: 20, level: level, person: person, hiss: hiss, personEcho: echo))
     }
 
     private func readings(_ x: [Float]) -> [SonarAnalyzer.Reading] {
@@ -784,12 +788,23 @@ final class SonarTests: XCTestCase {
             out += analyzer.process(Array(x[i..<min(i + 1024, x.count)]))
             i += 1024
         }
-        return Array(out.dropFirst(16))      // skip the first few seconds while it settles
+        return Array(out.dropFirst(32))      // skip the first 8 s while it settles (the real test waits longer)
+    }
+
+    /// Matches a real MacBook test: tone heard at ~0.009 with realistic microphone hiss. The first
+    /// version only reached a 2.2× difference here.
+    func testRealisticQuietToneWithMicrophoneHiss() {
+        let here = readings(micSignal(seconds: 20, level: 0.0072, person: true, hiss: 0.002))
+        let empty = readings(micSignal(seconds: 20, level: 0.0072, person: false, hiss: 0.002))
+        let result = SonarTestResult.evaluate(present: here, away: empty)
+        print(String(format: "SONAR realistic: separation %.1fx tone %.4f", result.separation, result.toneLevel))
+        XCTAssertTrue(result.works, result.message)
+        XCTAssertGreaterThan(result.separation, 5)
     }
 
     func testPersonIsClearlyStrongerThanEmptyRoom() {
-        let here = readings(micSignal(seconds: 10, person: true))
-        let empty = readings(micSignal(seconds: 10, person: false))
+        let here = readings(micSignal(seconds: 18, person: true))
+        let empty = readings(micSignal(seconds: 18, person: false))
         let result = SonarTestResult.evaluate(present: here, away: empty)
         XCTAssertTrue(result.works, result.message)
         XCTAssertGreaterThan(result.separation, 10)
@@ -797,26 +812,26 @@ final class SonarTests: XCTestCase {
     }
 
     func testEvenSittingStillBreathingCounts() {
-        let still = readings(micSignal(seconds: 12, person: true, breathingOnly: true))
-        let empty = readings(micSignal(seconds: 12, person: false))
+        let still = readings(micSignal(seconds: 20, person: true, breathingOnly: true))
+        let empty = readings(micSignal(seconds: 20, person: false))
         XCTAssertTrue(SonarTestResult.evaluate(present: still, away: empty).works)
     }
 
     func testVolumeDoesNotChangeTheMotionReading() {
-        let loud = readings(micSignal(seconds: 8, level: 0.08, person: true))
-        let quiet = readings(micSignal(seconds: 8, level: 0.02, person: true))
+        let loud = readings(micSignal(seconds: 16, level: 0.08, person: true))
+        let quiet = readings(micSignal(seconds: 16, level: 0.02, person: true))
         let ratio = loud.map(\.motion).reduce(0, +) / quiet.map(\.motion).reduce(0, +)
         XCTAssertEqual(ratio, 1, accuracy: 0.3)
     }
 
     func testMusicThroughTheSpeakersDoesNotLookLikeAPerson() {
-        let musicOnly = readings(micSignal(seconds: 10, person: false, music: true))
-        let here = readings(micSignal(seconds: 10, person: true))
+        let musicOnly = readings(micSignal(seconds: 18, person: false, music: true))
+        let here = readings(micSignal(seconds: 18, person: true))
         XCTAssertTrue(SonarTestResult.evaluate(present: here, away: musicOnly).works)
     }
 
     func testReportsWhenTheToneCannotBeHeard() {
-        let silent = readings(micSignal(seconds: 6, level: 0, person: false))
+        let silent = readings(micSignal(seconds: 14, level: 0, person: false))
         let result = SonarTestResult.evaluate(present: silent, away: silent)
         XCTAssertFalse(result.works)
         XCTAssertTrue(result.message.contains("couldn't hear"))

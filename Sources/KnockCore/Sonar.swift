@@ -6,12 +6,13 @@ import Foundation
 ///
 /// The microphone signal is mixed down around the tone's frequency (like a Doppler radar): the static
 /// echo from walls and furniture becomes a constant, while anything that moves (a person breathing,
-/// shifting, typing) makes the echo's phase wobble. The wobble's energy relative to the tone's
-/// strength is the "motion" reading, so it doesn't depend on volume. Breathing (~0.2–0.5 Hz) counts,
-/// slow drifts below ~0.15 Hz don't. Not thread-safe: call from one queue.
+/// shifting, typing) makes the echo's phase wobble. Only human-speed wobble (≈0.15–6 Hz) is measured,
+/// and the microphone's own hiss is measured the same way just beside the tone (where there is no
+/// echo) and subtracted, so an empty room reads close to zero. The result is relative to the tone's
+/// strength, so it doesn't depend on volume. Not thread-safe: call from one queue.
 public final class SonarAnalyzer {
     public struct Reading: Equatable, Sendable {
-        /// Movement energy relative to the tone's strength (dimensionless).
+        /// Movement energy relative to the tone's strength (dimensionless, hiss removed).
         public let motion: Double
         /// Strength of the tone as heard by the microphone (amplitude, 0…1).
         public let toneLevel: Double
@@ -19,48 +20,93 @@ public final class SonarAnalyzer {
 
     public let sampleRate: Double
     public let toneFrequency: Double
+    /// Offset of the hiss reference from the tone (a multiple of the 200 Hz baseband rate, so tone
+    /// leakage lands on DC and is removed).
+    static let referenceOffset = 600.0
 
-    // Oscillator as a rotating phasor (no trig per sample).
-    private var oscRe = 1.0, oscIm = 0.0
-    private let stepRe: Double, stepIm: Double
-    private var renormalizeCounter = 0
-
-    private var lowI1: Biquad, lowI2: Biquad, lowQ1: Biquad, lowQ2: Biquad
+    private var tone: Channel
+    private var reference: Channel
     private let decimation: Int
     private var blockCount = 0
-    private var blockI = 0.0, blockQ = 0.0
-
-    // Baseband (≈200 Hz): DC (static echo) tracking and motion accumulation.
-    private let basebandRate: Double
-    private var dcI = 0.0, dcQ = 0.0
-    private var dcPrimed = false
-    private let dcAlpha: Double
-    private var motionSum = 0.0, toneSum = 0.0, readingCount = 0
+    private var motionSum = 0.0, hissSum = 0.0, toneSum = 0.0, readingCount = 0
     private let samplesPerReading: Int
+    /// Recent per-reading motion values; each reading reports their average (~2 s), which steadies
+    /// the leftover hiss. Presence doesn't need to react faster than that.
+    private var recentMotion: [Double] = []
+    private let smoothingCount: Int
 
     public init(sampleRate: Double, toneFrequency: Double = 19_500, readingsPerSecond: Double = 4) {
         self.sampleRate = sampleRate
         self.toneFrequency = toneFrequency
-        let w = 2 * Double.pi * toneFrequency / sampleRate
-        stepRe = cos(w)
-        stepIm = -sin(w)
-        lowI1 = .lowPass(cutoff: 120, sampleRate: sampleRate)
-        lowI2 = .lowPass(cutoff: 120, sampleRate: sampleRate)
-        lowQ1 = .lowPass(cutoff: 120, sampleRate: sampleRate)
-        lowQ2 = .lowPass(cutoff: 120, sampleRate: sampleRate)
         decimation = max(1, Int(sampleRate / 200))
-        basebandRate = sampleRate / Double(decimation)
-        dcAlpha = 1 - exp(-2 * Double.pi * 0.15 / basebandRate)
+        let basebandRate = sampleRate / Double(decimation)
+        tone = Channel(frequency: toneFrequency, sampleRate: sampleRate, basebandRate: basebandRate)
+        reference = Channel(frequency: toneFrequency - Self.referenceOffset, sampleRate: sampleRate, basebandRate: basebandRate)
         samplesPerReading = max(1, Int(basebandRate / readingsPerSecond))
+        smoothingCount = max(1, Int(2 * readingsPerSecond))
     }
 
     public func process(_ samples: [Float]) -> [Reading] {
         var readings: [Reading] = []
         for sample in samples {
             let x = Double(sample)
-            let i = lowI2.process(lowI1.process(x * oscRe))
-            let q = lowQ2.process(lowQ1.process(x * oscIm))
-            // Advance the oscillator.
+            tone.mix(x)
+            reference.mix(x)
+            blockCount += 1
+            guard blockCount == decimation else { continue }
+            blockCount = 0
+            let t = tone.baseband(decimation)
+            let r = reference.baseband(decimation)
+            motionSum += t.motion
+            hissSum += r.motion
+            toneSum += t.power
+            readingCount += 1
+            guard readingCount == samplesPerReading else { continue }
+            let toneMean = toneSum / Double(readingCount)
+            // Keep the sign until after averaging: clamping each reading would turn random hiss into a
+            // steady positive bias.
+            let motion = (motionSum - hissSum) / Double(readingCount)
+            motionSum = 0
+            hissSum = 0
+            toneSum = 0
+            readingCount = 0
+            recentMotion.append(toneMean > 0 ? motion / toneMean : 0)
+            if recentMotion.count > smoothingCount { recentMotion.removeFirst(recentMotion.count - smoothingCount) }
+            let smoothed = max(0, recentMotion.reduce(0, +) / Double(recentMotion.count))
+            // Mixing halves the amplitude; ×2 gives the tone's amplitude in the microphone signal.
+            readings.append(Reading(motion: smoothed, toneLevel: 2 * toneMean.squareRoot()))
+        }
+        return readings
+    }
+
+    /// One mixer: oscillator → low-pass → 200 Hz baseband → remove static part → keep 0.15–6 Hz.
+    private struct Channel {
+        private var oscRe = 1.0, oscIm = 0.0
+        private let stepRe: Double, stepIm: Double
+        private var renormalizeCounter = 0
+        private var lowI1: Biquad, lowI2: Biquad, lowQ1: Biquad, lowQ2: Biquad
+        private var blockI = 0.0, blockQ = 0.0
+        private var dcI = 0.0, dcQ = 0.0
+        private var dcPrimed = false
+        private let dcAlpha: Double
+        private var slowI: Biquad, slowQ: Biquad
+
+        init(frequency: Double, sampleRate: Double, basebandRate: Double) {
+            let w = 2 * Double.pi * frequency / sampleRate
+            stepRe = cos(w)
+            stepIm = -sin(w)
+            lowI1 = .lowPass(cutoff: 120, sampleRate: sampleRate)
+            lowI2 = .lowPass(cutoff: 120, sampleRate: sampleRate)
+            lowQ1 = .lowPass(cutoff: 120, sampleRate: sampleRate)
+            lowQ2 = .lowPass(cutoff: 120, sampleRate: sampleRate)
+            dcAlpha = 1 - exp(-2 * Double.pi * 0.15 / basebandRate)
+            slowI = .lowPass(cutoff: 6, sampleRate: basebandRate)
+            slowQ = .lowPass(cutoff: 6, sampleRate: basebandRate)
+        }
+
+        mutating func mix(_ x: Double) {
+            blockI += lowI2.process(lowI1.process(x * oscRe))
+            blockQ += lowQ2.process(lowQ1.process(x * oscIm))
             let re = oscRe * stepRe - oscIm * stepIm
             oscIm = oscRe * stepIm + oscIm * stepRe
             oscRe = re
@@ -71,40 +117,23 @@ public final class SonarAnalyzer {
                 oscIm /= magnitude
                 renormalizeCounter = 0
             }
+        }
 
-            blockI += i
-            blockQ += q
-            blockCount += 1
-            guard blockCount == decimation else { continue }
-            let bi = blockI / Double(decimation), bq = blockQ / Double(decimation)
+        /// Called once per decimation block: returns movement-band energy and total power.
+        mutating func baseband(_ decimation: Int) -> (motion: Double, power: Double) {
+            let i = blockI / Double(decimation), q = blockQ / Double(decimation)
             blockI = 0
             blockQ = 0
-            blockCount = 0
-            if let reading = baseband(bi, bq) { readings.append(reading) }
+            if !dcPrimed {
+                dcI = i
+                dcQ = q
+                dcPrimed = true
+            }
+            dcI += (i - dcI) * dcAlpha
+            dcQ += (q - dcQ) * dcAlpha
+            let mi = slowI.process(i - dcI), mq = slowQ.process(q - dcQ)
+            return (mi * mi + mq * mq, i * i + q * q)
         }
-        return readings
-    }
-
-    private func baseband(_ i: Double, _ q: Double) -> Reading? {
-        if !dcPrimed {
-            dcI = i
-            dcQ = q
-            dcPrimed = true
-        }
-        dcI += (i - dcI) * dcAlpha
-        dcQ += (q - dcQ) * dcAlpha
-        let hi = i - dcI, hq = q - dcQ
-        motionSum += hi * hi + hq * hq
-        toneSum += i * i + q * q
-        readingCount += 1
-        guard readingCount == samplesPerReading else { return nil }
-        let motion = motionSum / Double(readingCount)
-        let tone = toneSum / Double(readingCount)
-        motionSum = 0
-        toneSum = 0
-        readingCount = 0
-        // Mixing halves the amplitude; ×2 gives the tone's amplitude in the microphone signal.
-        return Reading(motion: tone > 0 ? motion / tone : 0, toneLevel: 2 * tone.squareRoot())
     }
 }
 
@@ -169,7 +198,8 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
                                    message: "The microphone couldn't hear the ultrasonic tone. Turn the volume up (at least 30%) and make sure sound comes from the Mac's own speakers, then try again. Some Macs can't play or hear tones this high.")
         }
         let here = median(present.map(\.motion))
-        let empty = max(percentile(away.map(\.motion), 0.8), 1e-12)
+        // With the hiss subtracted an empty room can read ~0, so cap the ratio at 100×.
+        let empty = max(percentile(away.map(\.motion), 0.8), here * 0.01, 1e-12)
         let separation = here / empty
         guard separation >= 3 else {
             return SonarTestResult(works: false, threshold: nil, separation: separation, toneLevel: tone,
