@@ -16,6 +16,17 @@ public final class SonarAnalyzer {
         public let motion: Double
         /// Strength of the tone as heard by the microphone (amplitude, 0…1).
         public let toneLevel: Double
+        /// Microphone hiss in the same band, relative to the tone (diagnostic).
+        public var hiss: Double = 0
+        /// How fast the received tone drifts against the microphone's clock, in Hz (diagnostic).
+        public var drift: Double = 0
+
+        public init(motion: Double, toneLevel: Double, hiss: Double = 0, drift: Double = 0) {
+            self.motion = motion
+            self.toneLevel = toneLevel
+            self.hiss = hiss
+            self.drift = drift
+        }
     }
 
     public let sampleRate: Double
@@ -40,8 +51,9 @@ public final class SonarAnalyzer {
         self.toneFrequency = toneFrequency
         decimation = max(1, Int(sampleRate / 200))
         let basebandRate = sampleRate / Double(decimation)
-        tone = Channel(frequency: toneFrequency, sampleRate: sampleRate, basebandRate: basebandRate)
-        reference = Channel(frequency: toneFrequency - Self.referenceOffset, sampleRate: sampleRate, basebandRate: basebandRate)
+        tone = Channel(frequency: toneFrequency, sampleRate: sampleRate, basebandRate: basebandRate, tracksDrift: true)
+        reference = Channel(frequency: toneFrequency - Self.referenceOffset, sampleRate: sampleRate,
+                            basebandRate: basebandRate, tracksDrift: false)
         samplesPerReading = max(1, Int(basebandRate / readingsPerSecond))
         smoothingCount = max(1, Int(2 * readingsPerSecond))
     }
@@ -63,6 +75,7 @@ public final class SonarAnalyzer {
             readingCount += 1
             guard readingCount == samplesPerReading else { continue }
             let toneMean = toneSum / Double(readingCount)
+            let hissMean = hissSum / Double(readingCount)
             // Keep the sign until after averaging: clamping each reading would turn random hiss into a
             // steady positive bias.
             let motion = (motionSum - hissSum) / Double(readingCount)
@@ -74,7 +87,8 @@ public final class SonarAnalyzer {
             if recentMotion.count > smoothingCount { recentMotion.removeFirst(recentMotion.count - smoothingCount) }
             let smoothed = max(0, recentMotion.reduce(0, +) / Double(recentMotion.count))
             // Mixing halves the amplitude; ×2 gives the tone's amplitude in the microphone signal.
-            readings.append(Reading(motion: smoothed, toneLevel: 2 * toneMean.squareRoot()))
+            readings.append(Reading(motion: smoothed, toneLevel: 2 * toneMean.squareRoot(),
+                                    hiss: toneMean > 0 ? hissMean / toneMean : 0, drift: tone.driftHz))
         }
         return readings
     }
@@ -90,8 +104,21 @@ public final class SonarAnalyzer {
         private var dcPrimed = false
         private let dcAlpha: Double
         private var slowI: Biquad, slowQ: Biquad
+        // Clock-drift tracking: the speaker and microphone run on separate clocks, so the received
+        // tone slowly rotates against our oscillator. That steady rotation is measured and undone;
+        // a person's movement wobbles back and forth and survives.
+        private let tracksDrift: Bool
+        private let basebandRate: Double
+        private var previousI = 0.0, previousQ = 0.0, hasPrevious = false
+        private var advanceRe = 0.0, advanceIm = 0.0
+        private let advanceAlpha: Double
+        private var derotation = 0.0
+        private(set) var driftHz = 0.0
 
-        init(frequency: Double, sampleRate: Double, basebandRate: Double) {
+        init(frequency: Double, sampleRate: Double, basebandRate: Double, tracksDrift: Bool) {
+            self.tracksDrift = tracksDrift
+            self.basebandRate = basebandRate
+            advanceAlpha = 1 - exp(-1 / (5 * basebandRate))       // ~5 s average
             let w = 2 * Double.pi * frequency / sampleRate
             stepRe = cos(w)
             stepIm = -sin(w)
@@ -121,9 +148,28 @@ public final class SonarAnalyzer {
 
         /// Called once per decimation block: returns movement-band energy and total power.
         mutating func baseband(_ decimation: Int) -> (motion: Double, power: Double) {
-            let i = blockI / Double(decimation), q = blockQ / Double(decimation)
+            var i = blockI / Double(decimation), q = blockQ / Double(decimation)
             blockI = 0
             blockQ = 0
+            let power = i * i + q * q
+            if tracksDrift {
+                if hasPrevious {
+                    // z · conj(previous): its angle is how far the tone turned since the last sample.
+                    let re = i * previousI + q * previousQ
+                    let im = q * previousI - i * previousQ
+                    advanceRe += (re - advanceRe) * advanceAlpha
+                    advanceIm += (im - advanceIm) * advanceAlpha
+                }
+                previousI = i
+                previousQ = q
+                hasPrevious = true
+                let step = atan2(advanceIm, advanceRe)
+                driftHz = step * basebandRate / (2 * Double.pi)
+                derotation += step
+                if derotation > Double.pi { derotation -= 2 * Double.pi } else if derotation < -Double.pi { derotation += 2 * Double.pi }
+                let c = cos(derotation), sn = sin(derotation)
+                (i, q) = (i * c + q * sn, q * c - i * sn)
+            }
             if !dcPrimed {
                 dcI = i
                 dcQ = q
@@ -132,7 +178,7 @@ public final class SonarAnalyzer {
             dcI += (i - dcI) * dcAlpha
             dcQ += (q - dcQ) * dcAlpha
             let mi = slowI.process(i - dcI), mq = slowQ.process(q - dcQ)
-            return (mi * mi + mq * mq, i * i + q * q)
+            return (mi * mi + mq * mq, power)
         }
     }
 }
@@ -180,6 +226,8 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
     /// How many times stronger the motion signal was with the person there than away.
     public let separation: Double
     public let toneLevel: Double
+    /// Diagnostic numbers (you / empty room / hiss / clock drift).
+    public var details: String?
     public let message: String
 
     /// Judges a test from readings taken while the user sat at the Mac and while they were away.
@@ -193,9 +241,12 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
             return sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * p))]
         }
         let tone = median((present + away).map(\.toneLevel))
+        let details = String(format: "You %.1e · empty room %.1e · hiss %.1e · clock drift %.2f Hz",
+                             median(present.map(\.motion)), median(away.map(\.motion)),
+                             median((present + away).map(\.hiss)), median((present + away).map(\.drift)))
         guard tone > 0.0005 else {
             return SonarTestResult(works: false, threshold: nil, separation: 0, toneLevel: tone,
-                                   message: "The microphone couldn't hear the ultrasonic tone. Turn the volume up (at least 30%) and make sure sound comes from the Mac's own speakers, then try again. Some Macs can't play or hear tones this high.")
+                                   details: details, message: "The microphone couldn't hear the ultrasonic tone. Turn the volume up (at least 30%) and make sure sound comes from the Mac's own speakers, then try again. Some Macs can't play or hear tones this high.")
         }
         let here = median(present.map(\.motion))
         // With the hiss subtracted an empty room can read ~0, so cap the ratio at 100×.
@@ -203,12 +254,12 @@ public struct SonarTestResult: Codable, Equatable, Sendable {
         let separation = here / empty
         guard separation >= 3 else {
             return SonarTestResult(works: false, threshold: nil, separation: separation, toneLevel: tone,
-                                   message: String(format: "Sonar couldn't reliably tell you apart from an empty room (only %.1f× difference). Try again somewhere quieter, with nobody else moving nearby, and walk at least 3 metres away.", separation))
+                                   details: details, message: String(format: "Sonar couldn't reliably tell you apart from an empty room (only %.1f× difference). Try again somewhere quieter, with nobody else moving nearby, and walk at least 3 metres away.", separation))
         }
         // Between the two, leaning towards "present" so it doesn't lock while you're there.
         let threshold = min((here * empty).squareRoot(), here * 0.5)
         return SonarTestResult(works: true, threshold: threshold, separation: separation, toneLevel: tone,
-                               message: String(format: "Sonar works on your Mac: the signal was %.0f× stronger with you there than with the room empty.", separation))
+                               details: details, message: String(format: "Sonar works on your Mac: the signal was %.0f× stronger with you there than with the room empty.", separation))
     }
 }
 

@@ -86,6 +86,11 @@ private struct SonarTestCard: View {
                 Text(result.message).fixedSize(horizontal: false, vertical: true)
                 Text(String(format: "Echo strength %.4f · difference %.1f×", result.toneLevel, result.separation))
                     .font(.caption).foregroundStyle(.secondary)
+                if let details = result.details {
+                    Text(details)
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
                 Button("Run the Test Again") { state.startSonarTest() }
             }
         case .preparing:

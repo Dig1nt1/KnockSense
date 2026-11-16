@@ -756,18 +756,20 @@ final class SonarTests: XCTestCase {
     /// person (echo whose distance wobbles with breathing and small movements), room noise and,
     /// optionally, music playing through the speakers.
     private func micSignal(seconds: Double, level: Double = 0.05, person: Bool, breathingOnly: Bool = false,
-                           music: Bool = false, hiss: Double = 0.0005, personEcho: Double = 0.08) -> [Float] {
+                           music: Bool = false, hiss: Double = 0.0005, personEcho: Double = 0.08,
+                           clockDriftPPM: Double = 0) -> [Float] {
         let n = Int(seconds * rate)
         var x = [Float](repeating: 0, count: n)
         let c = 343.0
+        let f = tone * (1 + clockDriftPPM / 1_000_000)     // speaker clock slightly off from the mic's
         for i in 0..<n {
             let t = Double(i) / rate
-            var v = level * sin(2 * .pi * tone * t)                                   // direct path
-            v += level * 0.3 * sin(2 * .pi * tone * (t - 2 * 1.5 / c))               // wall 1.5 m away
+            var v = level * sin(2 * .pi * f * t)                                      // direct path
+            v += level * 0.3 * sin(2 * .pi * f * (t - 2 * 1.5 / c))                  // wall 1.5 m away
             if person {
                 var d = 0.5 + 0.003 * sin(2 * .pi * 0.25 * t)                          // breathing, 3 mm
                 if !breathingOnly { d += 0.01 * sin(2 * .pi * 0.9 * t) + 0.004 * sin(2 * .pi * 3.1 * t) }  // shifting
-                v += level * personEcho * sin(2 * .pi * tone * (t - 2 * d / c))
+                v += level * personEcho * sin(2 * .pi * f * (t - 2 * d / c))
             }
             if music { v += 0.2 * sin(2 * .pi * 440 * t) + 0.1 * sin(2 * .pi * 2_637 * t) }
             v += noise() * hiss
@@ -776,8 +778,8 @@ final class SonarTests: XCTestCase {
         return x
     }
 
-    func probeReadings(level: Double, person: Bool, hiss: Double, echo: Double) -> [SonarAnalyzer.Reading] {
-        readings(micSignal(seconds: 20, level: level, person: person, hiss: hiss, personEcho: echo))
+    func probeReadings(level: Double, person: Bool, hiss: Double, echo: Double, drift: Double = 0) -> [SonarAnalyzer.Reading] {
+        readings(micSignal(seconds: 20, level: level, person: person, hiss: hiss, personEcho: echo, clockDriftPPM: drift))
     }
 
     private func readings(_ x: [Float]) -> [SonarAnalyzer.Reading] {
@@ -800,6 +802,20 @@ final class SonarTests: XCTestCase {
         print(String(format: "SONAR realistic: separation %.1fx tone %.4f", result.separation, result.toneLevel))
         XCTAssertTrue(result.works, result.message)
         XCTAssertGreaterThan(result.separation, 5)
+    }
+
+    /// The speaker and microphone run on separate clocks. A drift of just 5–50 ppm made the first
+    /// versions read an empty room as busy (real MacBook result: 1.9×).
+    func testClockDriftBetweenSpeakerAndMicIsCancelled() {
+        for drift in [5.0, 20, 50] {
+            let here = probeReadings(level: 0.0047, person: true, hiss: 0.001, echo: 0.01, drift: drift)
+            let empty = probeReadings(level: 0.0047, person: false, hiss: 0.001, echo: 0.01, drift: drift)
+            let result = SonarTestResult.evaluate(present: here, away: empty)
+            XCTAssertTrue(result.works, "drift \(drift) ppm: \(result.message)")
+            let measured = empty.map(\.drift).sorted()[empty.count / 2]
+            XCTAssertEqual(measured, 19_500 * drift / 1_000_000, accuracy: 0.05, "drift estimate")
+            XCTAssertNotNil(result.details)
+        }
     }
 
     func testPersonIsClearlyStrongerThanEmptyRoom() {
