@@ -642,7 +642,7 @@ final class AppState: ObservableObject {
         refreshSonar()
         sonarTestTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            func countdown(_ seconds: Int, _ phase: (Int) -> SonarTestPhase) async -> Bool {
+            @MainActor func countdown(_ seconds: Int, _ phase: (Int) -> SonarTestPhase) async -> Bool {
                 for left in stride(from: seconds, to: 0, by: -1) {
                     self.sonarTest = phase(left)
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
