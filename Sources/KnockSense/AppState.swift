@@ -120,6 +120,8 @@ final class AppState: ObservableObject {
     private var testLeavingReadings: [SonarAnalyzer.Reading] = []
     private var volumeBeforeTest: GuardSystem.VolumeState?
     private var screenLocked = false
+    /// The display is off (it went to sleep, the lid closed or the Mac is going to sleep).
+    private(set) var displayAsleep = false
     private var screenObservers: [NSObjectProtocol] = []
 
     private let store = ConfigStore()
@@ -183,6 +185,24 @@ final class AppState: ObservableObject {
             guard let state = self else { return }
             Task { @MainActor in state.screenUnlocked() }
         })
+        // Nobody sees an action run on a dark screen, and listening keeps the processor awake, so
+        // pause while the display sleeps (the microphone has no low-power mode).
+        let workspace = NSWorkspace.shared.notificationCenter
+        for (name, asleep) in [(NSWorkspace.screensDidSleepNotification, true), (NSWorkspace.willSleepNotification, true),
+                               (NSWorkspace.screensDidWakeNotification, false)] {
+            screenObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                guard let state = self else { return }
+                Task { @MainActor in state.displaySleepChanged(asleep) }
+            })
+        }
+        // Waking the Mac doesn't always turn the screen on (Power Nap), so check the display itself.
+        screenObservers.append(workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let state = self else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                state.checkDisplayAwake()
+            }
+        })
         nameListener.onProblem = { [weak self] problem in
             guard let state = self else { return }
             Task { @MainActor in state.listenProblem = problem }
@@ -225,7 +245,9 @@ final class AppState: ObservableObject {
 
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 50_000_000)
+                // Check less often while paused, so the processor can rest.
+                let paused = self?.pausedForSleep ?? false
+                try? await Task.sleep(nanoseconds: paused ? 1_000_000_000 : 50_000_000)
                 self?.poll()
             }
         }
@@ -252,6 +274,7 @@ final class AppState: ObservableObject {
         watchdogTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self?.checkDisplayAwake()
                 self?.checkMicrophoneHealth()
             }
         }
@@ -268,13 +291,54 @@ final class AppState: ObservableObject {
 
     /// The microphone is needed for knocks (microphone mode) or for the listening features.
     var micNeeded: Bool {
-        config.detectionSource == .microphone || config.listen.nameAlertEnabled || config.listen.autoDuckEnabled
-            || sonarNeeded
+        if sonarNeeded { return true }
+        guard !pausedForSleep else { return false }
+        return config.detectionSource == .microphone || config.listen.nameAlertEnabled || config.listen.autoDuckEnabled
     }
 
-    /// Sonar runs during the test, and for lock-when-away once the test has passed.
+    /// Sonar runs during the test, and for lock-when-away once the test has passed. While the display
+    /// sleeps it keeps running only to wake the screen when you come back.
     var sonarNeeded: Bool {
-        sonarTestRunning || (config.enabled && config.presence.lockWhenAway && config.presence.canLock)
+        if sonarTestRunning { return true }
+        guard config.enabled, config.presence.lockWhenAway, config.presence.canLock else { return false }
+        return !pausedForSleep || config.presence.wakeOnReturn
+    }
+
+    /// Listening pauses while the display is off, unless Laptop Guard is armed or a sonar test is running.
+    var pausedForSleep: Bool {
+        displayAsleep && !guardian.isActive && !sonarTestRunning
+    }
+
+    private func displaySleepChanged(_ asleep: Bool) {
+        guard asleep != displayAsleep, !Self.isSnapshotMode else { return }
+        displayAsleep = asleep
+        guard config.enabled, !guardian.isActive else { return }
+        if asleep {
+            if config.detectionSource == .motion { motion.stop() }
+            matchMicrophoneToNeeds()
+            refreshListenFeatures()
+            refreshSonar()
+            if !micRunning, config.detectionSource == .microphone { listening = false }
+            if config.detectionSource == .motion { listening = false }
+            levelModel.level = 0
+            grouper.reset()
+            pendingKnocks = []
+            appendLog("Paused while the display is off")
+        } else {
+            // Starting audio right at wake can fail; the watchdog retries a few seconds later.
+            recoveryAttempts = 0
+            if config.detectionSource == .motion { motion.start() }
+            matchMicrophoneToNeeds()
+            refreshListenFeatures()
+            refreshSonar()
+            appendLog("Listening again")
+        }
+    }
+
+    /// Catches a missed wake notification: resumes as soon as the main display is really on.
+    private func checkDisplayAwake() {
+        guard displayAsleep, CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return }
+        displaySleepChanged(false)
     }
 
     var sonarTestRunning: Bool {
@@ -724,7 +788,7 @@ final class AppState: ObservableObject {
     /// Turns the name listener and the talking detector on or off to match the settings.
     func refreshListenFeatures() {
         let settings = config.listen
-        let on = config.enabled
+        let on = config.enabled && !pausedForSleep
         audio.setSpeechWatch(on && settings.autoDuckEnabled ? .forSensitivity(settings.duckSensitivity) : nil)
         if !(on && settings.autoDuckEnabled), someoneTalking {
             someoneTalking = false
